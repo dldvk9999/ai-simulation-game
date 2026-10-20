@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 무인도 (AI Simulation Game)
 
-## Getting Started
+무인도에 떠밀려 온 사람이 **스스로 판단해 살아가는 모습**을 조용히 지켜보는 3D 힐링 시뮬레이션입니다.
+사람을 직접 조종할 수는 없지만, 주변 환경에 손길을 보태 그들을 도울 수 있습니다.
 
-First, run the development server:
+- **Next.js 16 (App Router)** + **three.js / React Three Fiber**
+- 저장·동시 관찰: **Supabase** (Postgres + Realtime) — 설정하지 않으면 로컬 파일 + 같은 브라우저 탭 간 동기화로 동작
+- 배포: **Vercel**
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 플레이
+
+1. 접속하면 입력칸 하나만 보입니다. **키**를 입력하세요.
+2. 처음 쓰는 키면 새로운 무인도가 시작되고, 이미 있는 키면 그 섬을 불러옵니다.
+3. 창을 닫아도 섬의 시간은 계속 흐릅니다. 다시 접속하면 그동안의 시간을 빠르게 따라잡고 **"당신이 없는 동안"** 일어난 일을 보여 줍니다.
+4. 같은 키로 **최대 3명**이 동시에 같은 섬을 지켜볼 수 있습니다.
+
+| 조작 | 효과 |
+| --- | --- |
+| 클릭 | **치기** — 나무를 흔들면 열매·가지가 떨어지고, 바위를 치면 돌이 떨어지고, 동물·물고기는 잠시 기절 |
+| 드래그 | **옮기기** — 물건·동물·물고기를 집어 옮김. 사람 앞에 놓으면 "선물"로 알아채고 반가워함 |
+| 연타 (같은 자리 5번) | **불 지피기** — 장작 위면 더 오래 탐. 비·폭풍·눈에는 잘 안 붙음 |
+| 사람 클릭 / 더블클릭 | 상태·감정·성격 보기 / 따라가기 (사람은 건드릴 수 없음) |
+| 빈 곳 드래그 · 우클릭(Shift) 드래그 · 휠 | 시점 회전 · 이동 · 확대 (WASD/QE 키도 가능) |
+
+## 시뮬레이션
+
+- **시간**: 게임 하루 = 현실 20분, 한 계절 7일, 1년 28일. 접속이 없어도 서버에 저장된 시각으로부터 경과 시간을 계산해 다음 접속 때 따라잡습니다.
+- **날씨**: 맑음 / 흐림 / 비 / 천둥번개 폭풍우 / 눈. 계절별 가중치가 다르지만 **어느 계절이든 맑음이 가장 자주** 나옵니다. 폭풍 때 번개가 나무에 떨어지면 불이 붙기도 합니다.
+- **생태계**: 나무·덤불·풀이 짧은 주기로 자라고 번식하며, 열매가 열립니다. 토끼·멧돼지·산양·게·들닭이 번식하고, 바닷가에는 물고기가 계속 나타납니다.
+- **사람 (규칙 기반 Utility AI)**
+  - 욕구(배고픔·목마름·기력·체온·교류·즐거움)와 건강, 성격 5요인, **사람마다 다른 감정 민감도**를 가집니다.
+  - 매 순간 욕구·감정·성격·마을 상황을 점수로 바꿔 행동을 고릅니다 (채집, 사냥, 낚시, 불 피우기, 요리, 건설, 제작, 농사, 목축, 연구, 대화, 휴식, 노래, 별 보기 …).
+  - 감정(기쁨·슬픔·두려움·분노·놀람·애정)에 따라 환호, 춤, 웅크림, 발 구르기, 하트 등 **제스처**를 하고 혼잣말을 합니다.
+  - **뗀석기**에서 시작해 불 → 움막 → 창 → 끈 → 돌도끼 → 간석기 → 토기 → 농경 → 통나무집 → 청동 → 문자 → 철기 → 석조 → 천문학 → 과학 → 증기 → 전기까지 33개 기술을 스스로 터득합니다. 생각(연구)과 "해 보면서 배우기"로 진행되며, 관찰자가 불을 보여 주면 불 발견이 빨라집니다.
+  - 표류자가 가끔 해변으로 떠밀려 오고, 서로 친해진 두 사람 사이에서 아이가 태어납니다. 굶주림·추위·노환으로 **사망**할 수 있고, 모두가 떠나면 새로운 표류자가 남겨진 흔적(집·도구)을 이어받습니다. 문자를 발명했다면 지식도 전부 이어집니다.
+- **발전 속도(목표치)**: 신석기 ≈ 현실 3~4시간, 청동기 ≈ 반나절, 철기 ≈ 1~2일, 과학 시대 ≈ 4일, 전기 ≈ 1~2주.
+
+## 구조
+
+```
+src/sim/          순수 TypeScript 시뮬레이션 엔진 (React 없음, 결정적 RNG)
+  terrain.ts      시드 → 섬 지형 (저장하지 않고 매번 생성)
+  world.ts        월드 생성/도우미      weather.ts  날씨
+  ecology.ts      식물·동물·물고기      people.ts   욕구·감정·생과 사
+  ai.ts           행동 선택과 실행      settlement.ts 연구·건설 계획
+  interactions.ts 관찰자의 손길         step.ts     한 스텝 진행 / 오프라인 따라잡기
+src/game/         브라우저 런타임: 호스트 선출, 동기화(net.ts), 저장, HUD 상태, 사운드
+src/components/   3D 장면(game/)과 HUD(hud/), 입장 화면(KeyGate)
+src/app/api/world join · save · heartbeat · leave · load
+src/server/       저장소 (Supabase 또는 로컬 파일)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **호스트 권한 방식**: 같은 섬을 보는 관찰자 중 가장 먼저 들어온 사람의 브라우저가 시뮬레이션을 돌리고(호스트), 다른 관찰자에게 상태를 방송합니다. 다른 관찰자의 클릭·드래그는 호스트에게 전달됩니다. 호스트가 나가면 다음 사람이 이어받습니다.
+- **저장**: 호스트가 15초마다(그리고 창을 숨길 때) 상태를 gzip으로 `/api/world/save`에 보냅니다.
+- **인원 제한**: 서버가 하트비트로 관찰자를 세어 4번째 입장을 막고, Realtime Presence로 한 번 더 확인합니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 로컬 실행
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Supabase 환경변수가 없으면 `.data/worlds/`에 저장하고, 같은 브라우저의 탭끼리만 함께 볼 수 있습니다.
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run sim:test -- 30          # 헤드리스로 30일 돌려 보기 (연대기·욕구 출력)
+npm run sim:era -- 700          # 시대별 도달 시점과 성능 측정
+npm run seed -- demo 120 60     # 'demo' 키로 120일 진행된 섬을 만들고 60분 전에 저장된 것처럼 기록
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Supabase 설정
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Supabase에서 프로젝트를 만듭니다.
+2. **SQL Editor**에서 [`supabase/schema.sql`](supabase/schema.sql)을 실행합니다.
+3. **Realtime**은 기본 설정 그대로 사용합니다 (Broadcast/Presence, 공개 채널 허용). Realtime 설정에서 *Private channels only* 를 켜지 않았는지 확인하세요.
+4. **Project Settings → API**에서 아래 값을 Vercel 환경변수로 넣습니다.
 
-## Deploy on Vercel
+| 변수 | 값 |
+| --- | --- |
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_ANON_KEY` | anon (또는 publishable) 키 — 브라우저 Realtime용 |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role (또는 secret) 키 — 서버 전용, 절대 공개 금지 |
+| `ISLAND_KEY_SALT` | (선택) 키 해시용 소금값. 한 번 정하면 바꾸지 마세요 |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Vercel의 Supabase 연동을 쓰면 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`가 자동으로 들어오는데, 이 이름들도 그대로 인식합니다.
