@@ -49,9 +49,27 @@ export function Controls({ terrain }: { terrain: Terrain }) {
     type Down = { x: number; y: number; button: number; pick: Pick | null; mode: "pending" | "orbit" | "pan" | "drag"; t: number; lastSend: number };
     let down: Down | null = null;
     const pointers = new Map<number, { x: number; y: number }>();
-    let pinch = 0;
+    // 두 손가락 제스처: 중심점 이동 = 시점 이동, 간격 변화 = 확대/축소
+    let gesture: { d: number; mx: number; my: number } | null = null;
     const clicks: { t: number; x: number; z: number }[] = [];
     let lastHover = 0;
+    let lastPersonTap = { id: -1, t: 0 };
+
+    const gestureOf = () => {
+      const [a, b] = [...pointers.values()];
+      return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+    };
+
+    /** 화면에서 dx, dy 픽셀만큼 땅을 끈다. 터치는 손가락 아래 땅이 따라오도록 화면 크기에 맞춘다 */
+    const panBy = (dx: number, dy: number, touch: boolean) => {
+      const fov = ((camera as THREE.PerspectiveCamera).fov ?? 45) * (Math.PI / 180);
+      const k = touch ? (2 * camState.dist * Math.tan(fov / 2)) / Math.max(1, el.clientHeight) : camState.dist * 0.0018;
+      const ky = touch ? k / Math.max(0.35, Math.sin(camState.pitch)) : k;
+      const sy = Math.sin(camState.yaw), cy = Math.cos(camState.yaw);
+      camState.tx += -dx * cy * k - dy * sy * ky;
+      camState.tz += dx * sy * k - dy * cy * ky;
+      if (useHud.getState().followId != null) useHud.setState({ followId: null });
+    };
 
     const rayAt = (cx: number, cy: number) => {
       const r = el.getBoundingClientRect();
@@ -69,9 +87,8 @@ export function Controls({ terrain }: { terrain: Terrain }) {
       el.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       amb?.start();
-      if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()];
-        pinch = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pointers.size >= 2) {
+        gesture = pointers.size === 2 ? gestureOf() : null;
         if (down?.mode === "drag" && down.pick) endDrag(down.pick, e.clientX, e.clientY);
         down = null;
         return;
@@ -99,15 +116,21 @@ export function Controls({ terrain }: { terrain: Terrain }) {
 
     const onMove = (e: PointerEvent) => {
       const prev = pointers.get(e.pointerId);
+      // movementX는 모바일 사파리에서 0으로 오기도 해서 직접 계산한다
+      const mdx = prev ? e.clientX - prev.x : 0;
+      const mdy = prev ? e.clientY - prev.y : 0;
       if (prev) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch > 0) camState.dist = THREE.MathUtils.clamp(camState.dist * (pinch / d), 7, 170);
-        pinch = d;
+      if (pointers.size >= 2) {
+        if (gesture && pointers.size === 2) {
+          const g = gestureOf();
+          if (gesture.d > 10 && g.d > 10) camState.dist = THREE.MathUtils.clamp(camState.dist * (gesture.d / g.d), 7, 170);
+          panBy(g.mx - gesture.mx, g.my - gesture.my, true);
+          gesture = g;
+        }
         return;
       }
       if (!down) {
+        if (prev || e.pointerType !== "mouse") return;
         // 호버 커서
         const now = performance.now();
         if (now - lastHover > 90 && rt.world) {
@@ -123,15 +146,10 @@ export function Controls({ terrain }: { terrain: Terrain }) {
         else down.mode = "orbit";
       }
       if (down.mode === "orbit") {
-        camState.yaw -= (e.movementX || 0) * 0.0055;
-        camState.pitch = THREE.MathUtils.clamp(camState.pitch + (e.movementY || 0) * 0.0045, 0.12, 1.45);
+        camState.yaw -= mdx * 0.0055;
+        camState.pitch = THREE.MathUtils.clamp(camState.pitch + mdy * 0.0045, 0.12, 1.45);
       } else if (down.mode === "pan") {
-        const k = camState.dist * 0.0018;
-        const mx = e.movementX || 0, my = e.movementY || 0;
-        const sy = Math.sin(camState.yaw), cy = Math.cos(camState.yaw);
-        camState.tx += (-mx * cy - my * sy) * k;
-        camState.tz += (mx * sy - my * cy) * k;
-        useHud.setState({ followId: null });
+        panBy(mdx, mdy, e.pointerType !== "mouse");
       } else if (down.mode === "drag" && down.pick) {
         const g = groundAt(e.clientX, e.clientY);
         if (g) {
@@ -150,7 +168,8 @@ export function Controls({ terrain }: { terrain: Terrain }) {
 
     const onUp = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
-      if (pointers.size < 2) pinch = 0;
+      if (pointers.size === 2) gesture = gestureOf();
+      else if (pointers.size < 2) gesture = null;
       if (!down) return;
       const d = down;
       down = null;
@@ -166,7 +185,11 @@ export function Controls({ terrain }: { terrain: Terrain }) {
       if (!p || !rt.world) return;
       if (p.k === "person") {
         const hud = useHud.getState();
-        useHud.setState({ selectedId: p.id ?? null, followId: hud.followId === p.id ? p.id : hud.followId });
+        // 같은 사람을 빠르게 두 번 누르면 따라가기 (모바일에는 dblclick이 없을 수 있다)
+        const now = performance.now();
+        const twice = lastPersonTap.id === p.id && now - lastPersonTap.t < 420;
+        lastPersonTap = { id: p.id ?? -1, t: now };
+        useHud.setState({ selectedId: p.id ?? null, followId: twice ? p.id ?? null : hud.followId === p.id ? p.id : hud.followId });
         if (!hud.hint) useHud.setState({ hint: "사람은 건드릴 수 없어요. 대신 주변 환경을 바꿔 도와줄 수 있어요." });
         return;
       }

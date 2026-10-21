@@ -122,12 +122,20 @@ button {
 .game {
   position: fixed;
   inset: 0;
-  touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
+/* 3D 화면에서는 브라우저 기본 제스처(스크롤·확대)를 끄고 직접 처리한다. 패널 스크롤은 그대로 */
 .game canvas {
   display: block;
+  touch-action: none;
+}
+
+.hud .card {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
 .hud {
@@ -569,6 +577,10 @@ button {
   text-align: center;
 }
 
+@keyframes sheet {
+  from { opacity: 0; transform: translateY(24px); }
+}
+
 @keyframes toast {
   from { opacity: 0; transform: translateY(-8px); }
 }
@@ -585,6 +597,7 @@ button {
 
 .hint {
   display: inline-block;
+  word-break: keep-all;
   background: rgba(40, 50, 60, 0.72);
   color: #fff;
   padding: 8px 16px;
@@ -721,10 +734,104 @@ button {
   transition: opacity 0.3s;
 }
 
+/* 햄버거 메뉴 (모바일 전용) */
+.menu-btn {
+  display: none;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(30, 40, 50, 0.16);
+  padding: 0;
+  z-index: 6;
+}
+
+.menu-btn i {
+  display: block;
+  width: 20px;
+  height: 2px;
+  margin: 4px auto;
+  border-radius: 2px;
+  background: var(--ink);
+  transition: transform 0.25s, opacity 0.2s;
+}
+
+.menu-btn.on i:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.menu-btn.on i:nth-child(2) { opacity: 0; }
+.menu-btn.on i:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+.menu-back {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.mobile-menu {
+  position: absolute;
+  top: 66px;
+  right: 12px;
+  z-index: 5;
+  background: rgba(255, 250, 240, 0.97);
+  display: grid;
+  gap: 2px;
+  min-width: 190px;
+  padding: 6px;
+  animation: toast 0.2s ease-out;
+}
+
+.mobile-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  text-align: left;
+}
+
+.mobile-menu button span {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+}
+
+.mobile-menu button.on,
+.mobile-menu button:active {
+  background: #fff1c9;
+}
+
 @media (max-width: 760px) {
+  .toolbar { display: none; }
+  .menu-btn { display: block; }
   .people { display: none; }
-  .person { width: calc(100vw - 28px); max-height: 46vh; overflow-y: auto; }
+  .status { top: 12px; left: 12px; padding: 9px 11px; max-width: calc(100vw - 84px); font-size: 13px; }
+  .status .day { font-size: 16px; }
+  .status .tiny { display: none; }
+  .chips { margin-top: 6px; }
+  /* 모바일에서는 패널을 아래에서 올라오는 시트로: 위쪽 상태 카드를 가리지 않게 */
+  .drawer {
+    top: auto;
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100% - 160px);
+    background: rgba(255, 250, 240, 0.97);
+    animation: sheet 0.25s ease-out;
+  }
+  .person { left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 46vh; overflow-y: auto; }
   .toasts { width: calc(100vw - 28px); top: 150px; }
-  .hint-wrap { max-width: calc(100vw - 28px); bottom: auto; top: 200px; }
+  .hint-wrap { max-width: calc(100vw - 28px); bottom: 18px; }
   .status { min-width: 0; }
 }

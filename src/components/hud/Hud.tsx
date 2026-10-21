@@ -24,6 +24,20 @@ const EMO_LABEL: [string, string, string][] = [
   ["anger", "화남", "#ff6b6b"],
 ];
 
+/** 터치 위주 기기인지 (게임 화면은 클라이언트에서만 렌더링된다) */
+function useTouch() {
+  const [touch] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches);
+  return touch;
+}
+
+type PanelKey = "people" | "chronicle" | "tech" | "help";
+const MENU: { key: PanelKey; icon: string; label: string }[] = [
+  { key: "people", icon: "👥", label: "사람들 · 창고" },
+  { key: "chronicle", icon: "📜", label: "연대기" },
+  { key: "tech", icon: "💡", label: "지식" },
+  { key: "help", icon: "❔", label: "도움말" },
+];
+
 export function Hud({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: () => void }) {
   const phase = useHud((s) => s.phase);
   return (
@@ -46,7 +60,12 @@ export function Hud({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExi
 
 function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: () => void }) {
   const s = useHud();
+  const [menu, setMenu] = useState(false);
   const toggle = (p: typeof s.panel) => useHud.setState({ panel: s.panel === p ? "none" : p });
+  const exit = () => {
+    rt.leave();
+    onExit();
+  };
   const mute = () => {
     const m = !s.muted;
     amb.setMuted(m);
@@ -77,22 +96,50 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
         </div>
         {s.offline && s.viewers <= 1 && <div className="tiny">로컬 모드 · 같은 브라우저 탭끼리만 함께 볼 수 있어요</div>}
       </div>
+      {/* 데스크톱: 아이콘 줄 */}
       <div className="toolbar">
-        <button className={s.panel === "people" ? "on" : ""} onClick={() => toggle("people")} title="사람들">👥</button>
-        <button className={s.panel === "chronicle" ? "on" : ""} onClick={() => toggle("chronicle")} title="연대기">📜</button>
-        <button className={s.panel === "tech" ? "on" : ""} onClick={() => toggle("tech")} title="지식">💡</button>
-        <button className={s.panel === "help" ? "on" : ""} onClick={() => toggle("help")} title="도움말">❔</button>
+        {MENU.map((m) => (
+          <button key={m.key} className={s.panel === m.key ? "on" : ""} onClick={() => toggle(m.key)} title={m.label}>
+            {m.icon}
+          </button>
+        ))}
         <button onClick={mute} title="소리">{s.muted ? "🔇" : "🔊"}</button>
-        <button
-          onClick={() => {
-            rt.leave();
-            onExit();
-          }}
-          title="나가기"
-        >
-          🚪
-        </button>
+        <button onClick={exit} title="나가기">🚪</button>
       </div>
+      {/* 모바일: 햄버거 버튼 하나에 모아서 */}
+      <button className={`menu-btn ${menu ? "on" : ""}`} onClick={() => setMenu((v) => !v)} aria-label="메뉴" aria-expanded={menu}>
+        <i />
+        <i />
+        <i />
+      </button>
+      {menu && (
+        <>
+          <div className="menu-back" onClick={() => setMenu(false)} />
+          <nav className="card mobile-menu">
+            {MENU.map((m) => (
+              <button
+                key={m.key}
+                className={s.panel === m.key ? "on" : ""}
+                onClick={() => {
+                  useHud.setState({ panel: m.key });
+                  setMenu(false);
+                }}
+              >
+                <span>{m.icon}</span>
+                {m.label}
+              </button>
+            ))}
+            <button onClick={mute}>
+              <span>{s.muted ? "🔇" : "🔊"}</span>
+              {s.muted ? "소리 켜기" : "소리 끄기"}
+            </button>
+            <button onClick={exit}>
+              <span>🚪</span>
+              나가기
+            </button>
+          </nav>
+        </>
+      )}
     </>
   );
 }
@@ -282,10 +329,16 @@ function TechTree() {
 }
 
 function Help() {
+  const touch = useTouch();
   return (
     <>
       <h3>섬을 돌보는 방법</h3>
       <ul className="help">
+        {touch && (
+          <li>
+            📱 <b>탭</b> = 치기 · <b>한 손가락으로 끌기</b> = 물건 옮기기 / 빈 곳이면 시점 회전 · <b>두 손가락으로 끌기</b> = 시점 이동 · <b>벌리고 오므리기</b> = 확대·축소 · 사람을 <b>두 번 탭</b> = 따라가기
+          </li>
+        )}
         <li>🖱️ <b>클릭</b> — 치기. 나무를 흔들면 열매나 가지가 떨어지고, 바위를 치면 돌이 떨어져요. 동물이나 물고기를 치면 잠시 기절해요.</li>
         <li>✋ <b>드래그</b> — 물건·동물·물고기를 집어 옮겨요. 사람 앞에 놓아주면 선물로 여기고 반가워해요.</li>
         <li>🔥 <b>연타</b> — 같은 자리를 빠르게 {5}번 클릭하면 불이 붙어요. 장작 위면 더 오래 타요. 비가 오면 잘 안 붙어요.</li>
@@ -313,6 +366,8 @@ function Toasts() {
 
 function Hint() {
   const hint = useHud((s) => s.hint);
+  const covered = useHud((s) => s.panel !== "none" || s.selected != null);
+  const touch = useTouch();
   const [show, setShow] = useState(true);
   useEffect(() => {
     if (!hint) return;
@@ -323,10 +378,16 @@ function Hint() {
     const id = setTimeout(() => setShow(false), 25000);
     return () => clearTimeout(id);
   }, []);
+  // 패널이나 인물 카드가 열려 있으면 그 위에 겹치지 않게 숨긴다
+  if (covered && !hint) return null;
   return (
     <div className="hint-wrap">
       {hint && <div className="hint">{hint}</div>}
-      {show && !hint && <div className="hint soft">클릭: 치기 · 드래그: 옮기기 · 연타: 불 지피기 · 빈 곳 드래그: 시점 회전</div>}
+      {show && !hint && (
+        <div className="hint soft">
+          {touch ? "탭: 치기 · 끌기: 옮기기 · 연타: 불 · 두 손가락: 시점 이동" : "클릭: 치기 · 드래그: 옮기기 · 연타: 불 지피기 · 빈 곳 드래그: 시점 회전"}
+        </div>
+      )}
     </div>
   );
 }

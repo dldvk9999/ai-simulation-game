@@ -108,9 +108,16 @@ class FileStore implements Store {
   async save(id: string, state: unknown, simTime: number) {
     await fs.mkdir(this.dir, { recursive: true });
     const updatedAt = Date.now();
+    const data = JSON.stringify({ state, simTime, updatedAt });
     const tmp = this.file(id) + ".tmp";
-    await fs.writeFile(tmp, JSON.stringify({ state, simTime, updatedAt }));
-    await fs.rename(tmp, this.file(id));
+    await fs.writeFile(tmp, data);
+    try {
+      await fs.rename(tmp, this.file(id));
+    } catch {
+      // Windows(특히 OneDrive 폴더)에서는 다른 프로세스가 잡고 있으면 rename이 실패한다
+      await fs.writeFile(this.file(id), data);
+      await fs.rm(tmp, { force: true });
+    }
     return updatedAt;
   }
   private map(id: string) {
