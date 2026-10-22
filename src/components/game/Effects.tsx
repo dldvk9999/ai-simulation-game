@@ -49,6 +49,11 @@ const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple", Spec>> = {
   chop: { n: 12, colors: ["#c9a26b", "#8a5f3d", "#e0c08a"], speed: 2.4, up: 3, life: 0.8, size: 0.16, g: 9 },
   stun: { n: 6, colors: ["#ffe14d"], speed: 1.4, up: 2, life: 0.6, size: 0.16, g: 3 },
   smoke: { n: 1, colors: ["#b9b4ad", "#cfcac3"], speed: 0.25, up: 1.1, life: 3.2, size: 0.45, g: -0.05, grow: 1.4 },
+  dust: { n: 16, colors: ["#b8a58a", "#a8977e", "#cbbca5"], speed: 1.6, up: 1.2, life: 2.4, size: 0.7, g: 0.2, spread: 1.4, grow: 1.6 },
+  collapse: { n: 22, colors: ["#8c6a48", "#a8a39a", "#6e4a30", "#cbbca5"], speed: 2.6, up: 3, life: 1.6, size: 0.35, g: 7, spread: 1.2 },
+  heal: { n: 14, colors: ["#8ce99a", "#d3f9d8", "#ffffff"], speed: 0.6, up: 1.8, life: 1.6, size: 0.22, g: -0.6, spread: 0.4 },
+  clash: { n: 10, colors: ["#fff3b0", "#ffd166", "#ffffff"], speed: 2.4, up: 2.2, life: 0.6, size: 0.2, g: 4 },
+  portal: { n: 40, colors: ["#9fe8ff", "#b197fc", "#ffffff"], speed: 2.2, up: 2.6, life: 1.8, size: 0.3, g: -0.4, spread: 1.6 },
 };
 
 export function Effects({ terrain }: { terrain: Terrain }) {
@@ -108,11 +113,19 @@ export function Effects({ terrain }: { terrain: Terrain }) {
       }
       if (f.type === "chip" || f.type === "chop" || f.type === "hit") amb?.pop(f.type === "chop" ? 320 : 520, 0.05);
       if (f.type === "splash") amb?.pop(900, 0.04);
+      if (f.type === "collapse") amb?.pop(140, 0.12);
+      if (f.type === "clash") amb?.pop(420, 0.06);
+      if (f.type === "heal" || f.type === "portal") amb?.chime();
+      if (f.type === "heal") {
+        const p = w.people.find((q) => q.id === f.ref);
+        y = terrain.height(p?.x ?? f.x, p?.z ?? f.z) + 1.2;
+      }
+      if (f.type === "portal") y = ground + 2.4;
       spawn(f.type, f.x, y, f.z);
     }
     if (seen.current.size > 3000) seen.current.clear();
     // 화면에서 바로 보이는 클릭 반응
-    for (const f of rt.localFx.splice(0)) spawn(f.type as keyof typeof SPECS, f.x, terrain.height(f.x, f.z) + 0.2, f.z);
+    for (const f of rt.localFx.splice(0)) spawn(f.type as keyof typeof SPECS, f.x, Math.max(terrain.height(f.x, f.z), 0) + 0.2, f.z);
     // 모닥불 연기
     smokeAcc.current += dt;
     if (smokeAcc.current > 0.25) {

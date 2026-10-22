@@ -2,12 +2,16 @@ import { runPerson } from "./ai";
 import { DAY, HOUR, MAX_CATCHUP, TIME_SCALE } from "./constants";
 import { dayOf, seasonOf, SEASONS } from "./clock";
 import { dailyAnimals, updateAnimals, updateFish, updateItems, updatePlants, updateStructures } from "./ecology";
+import { dailyDisaster, updateDisaster } from "./disaster";
+import { spreadIllness, updateIllness } from "./disease";
 import { checkDeath, dailyPeople, hourlyPeople, makeCtx, perceive, updateEmotions, updateNeeds } from "./people";
 import { chooseFocus, planFarms, planProject } from "./settlement";
+import { dailySociety } from "./society";
 import { getTerrain } from "./terrain";
 import { josa } from "./text";
 import type { WorldState } from "./types";
 import { chron } from "./world";
+import { dailyVoyage, updateVoyages } from "./voyage";
 import { updateWeather } from "./weather";
 
 /** 월드를 dt(게임 초)만큼 진행한다. 어떤 dt에도 동작하도록 작성되어 있다. */
@@ -16,6 +20,7 @@ export function step(w: WorldState, dt: number) {
   const prevHour = Math.floor(w.time / HOUR);
   w.time += dt;
   updateWeather(w, T, dt);
+  updateDisaster(w, T);
   updatePlants(w, T, dt);
   updateAnimals(w, T, dt);
   updateFish(w, T, dt);
@@ -24,16 +29,19 @@ export function step(w: WorldState, dt: number) {
 
   const ctx = makeCtx(w, T);
   for (const p of w.people) {
-    if (!p.alive) continue;
+    if (!p.alive || p.away) continue;
     updateNeeds(w, ctx, p, dt);
+    updateIllness(w, ctx, p, dt);
     updateEmotions(w, ctx, p, dt);
     perceive(w, ctx, p, dt);
     runPerson(w, ctx, p, dt);
     checkDeath(w, T, p);
   }
+  if (w.voyages.length) updateVoyages(w);
 
   if (Math.floor(w.time / HOUR) !== prevHour) {
     hourlyPeople(w);
+    spreadIllness(w);
     planProject(w, T);
     planFarms(w, T);
     if (!w.tech.focus) chooseFocus(w);
@@ -53,6 +61,9 @@ function daily(w: WorldState) {
   const T = getTerrain(w.seed);
   dailyAnimals(w, T);
   dailyPeople(w, T);
+  dailySociety(w, T);
+  dailyDisaster(w);
+  dailyVoyage(w);
   // 바위는 천천히 다시 드러난다
   for (const r of w.rocks) r.amt = Math.min(r.max, r.amt + (r.kind === "clay" ? 3 : 1));
   // 쓰지 못하고 쌓이는 가죽은 버린다

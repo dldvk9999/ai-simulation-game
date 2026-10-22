@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { hourOf, seasonOf, sunElevation } from "@/sim/clock";
 import { DAY, DAYS_PER_SEASON, TIME_SCALE } from "@/sim/constants";
+import { floodLevel, quakeShake } from "@/sim/disaster";
 import { clamp, smoothstep } from "@/sim/noise";
 import type { WorldState } from "@/sim/types";
 
@@ -37,6 +38,12 @@ export const env = {
   /** 0..1 계절 내 진행 */
   seasonT: 0,
   electric: false,
+  /** 쓰나미로 차오른 바닷물 높이 */
+  flood: 0,
+  /** 지진 흔들림 0..1 */
+  quake: 0,
+  /** 태풍 */
+  typhoon: 0,
 };
 
 const c = (hex: string) => new THREE.Color(hex);
@@ -100,6 +107,10 @@ export function updateEnv(w: WorldState, dt: number, now: number) {
   env.wet += (W.wet - env.wet) * (1 - Math.exp(-dt * 0.3));
   env.flash = Math.max(0, env.flash - dt * 5);
   env.electric = w.tech.known.includes("electricity");
+  env.flood = floodLevel(w, t);
+  env.quake = quakeShake(w, t);
+  const ty = w.disaster?.type === "typhoon" && t >= w.disaster.start && t <= w.disaster.until ? 1 : 0;
+  env.typhoon += (ty - env.typhoon) * k;
 
   const gloom = clamp(env.cloud * 0.35 + env.rain * 0.3 + env.storm * 0.35, 0, 1);
   // 하늘

@@ -177,9 +177,12 @@ function fromB64(b64: string) {
   return out;
 }
 
+/** 소수는 셋째 자리까지만: 위치·욕구 값에는 충분하고 저장·전송 크기가 절반으로 준다 */
+export const compact = (_: string, v: unknown) => (typeof v === "number" && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v);
+
 /** 큰 상태를 Realtime 메시지로 보내기 위해 gzip+base64 */
 export async function pack(obj: unknown): Promise<{ z?: string; j?: string }> {
-  const text = JSON.stringify(obj);
+  const text = JSON.stringify(obj, compact);
   const gz = await gzipBytes(text);
   return gz ? { z: toB64(gz) } : { j: text };
 }

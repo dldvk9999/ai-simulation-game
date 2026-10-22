@@ -4,9 +4,10 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Terrain } from "@/sim/terrain";
-import type { AnimalKind, Res, RockKind } from "@/sim/types";
+import { TIME_SCALE } from "@/sim/constants";
+import type { AnimalKind, FishKind, Res, RockKind } from "@/sim/types";
 import { useRuntime, useWorldVersion } from "./context";
-import { follow, lerpAngle } from "./env";
+import { env, follow, lerpAngle } from "./env";
 import { G, merge, part, vcMat } from "./geo";
 
 // ─── 바위 ──────────────────────────────────────────────────────────────
@@ -21,6 +22,14 @@ const ROCK_GEO: Record<RockKind, THREE.BufferGeometry> = {
     part(G.ico(0.1, 0), { color: "#e08a3c", pos: [0.1, 0.72, -0.3] }),
   ]),
   clay: merge([part(G.ico(0.7, 0), { color: "#b0664a", scale: [1.4, 0.35, 1.1], pos: [0, 0.08, 0] }), part(G.ico(0.35, 0), { color: "#c07656", scale: [1, 0.5, 1], pos: [0.6, 0.1, 0.3] })]),
+  // 땅을 파서 찾아낸 약돌 광맥: 하얗게 빛나는 결정
+  mineral: merge([
+    part(G.dodec(0.6), { color: "#7d7a76", scale: [1.3, 0.45, 1.1], pos: [0, 0.12, 0] }),
+    part(G.cone(0.13, 0.6, 5), { color: "#f2eefc", pos: [0.1, 0.5, 0.05], rot: [0.15, 0, -0.2] }),
+    part(G.cone(0.1, 0.45, 5), { color: "#e3dcf7", pos: [-0.25, 0.42, 0.2], rot: [-0.3, 0, 0.35] }),
+    part(G.cone(0.09, 0.4, 5), { color: "#ffffff", pos: [0.3, 0.38, -0.25], rot: [0.35, 0, -0.45] }),
+    part(G.cone(0.07, 0.3, 5), { color: "#d7cdf4", pos: [-0.1, 0.33, -0.3], rot: [0.4, 0, 0.2] }),
+  ]),
 };
 
 const tmpM = new THREE.Matrix4();
@@ -224,25 +233,55 @@ export function Animals({ terrain }: { terrain: Terrain }) {
 
 // ─── 물고기 ────────────────────────────────────────────────────────────
 
-const FISH_GEO = merge([
-  part(G.ico(0.16, 1), { color: "#8fb8d6", scale: [1.9, 0.7, 0.55] }),
-  part(G.cone(0.12, 0.2, 4), { color: "#6f9cc0", pos: [-0.36, 0, 0], rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.3] }),
-  part(G.box, { color: "#1b2733", pos: [0.22, 0.04, 0.07], scale: [0.03, 0.03, 0.02] }),
-  part(G.box, { color: "#1b2733", pos: [0.22, 0.04, -0.07], scale: [0.03, 0.03, 0.02] }),
-]);
-const BIGFISH_GEO = merge([
-  part(G.ico(0.16, 1), { color: "#d98f6a", scale: [1.9, 0.8, 0.55] }),
-  part(G.cone(0.12, 0.2, 4), { color: "#c4714c", pos: [-0.36, 0, 0], rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.3] }),
-  part(G.box, { color: "#1b2733", pos: [0.22, 0.05, 0.07], scale: [0.03, 0.03, 0.02] }),
-  part(G.box, { color: "#1b2733", pos: [0.22, 0.05, -0.07], scale: [0.03, 0.03, 0.02] }),
-]);
+const eyes = (x: number, y: number, z: number) => [
+  part(G.box, { color: "#1b2733", pos: [x, y, z], scale: [0.03, 0.03, 0.02] }),
+  part(G.box, { color: "#1b2733", pos: [x, y, -z], scale: [0.03, 0.03, 0.02] }),
+];
+const body = (color: string, fin: string, sx: number, sy: number, sz: number, extra: THREE.BufferGeometry[] = []) =>
+  merge([
+    part(G.ico(0.16, 1), { color, scale: [sx, sy, sz] }),
+    part(G.cone(0.12, 0.2, 4), { color: fin, pos: [-0.16 * sx - 0.06, 0, 0], rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.3] }),
+    ...eyes(0.12 * sx, 0.04, 0.07 * sz / 0.55),
+    ...extra,
+  ]);
+
+/** 물고기 종류마다 모양과 크기 */
+const FISH_GEO: Record<FishKind, THREE.BufferGeometry> = {
+  fish: body("#a9c7dc", "#7fa6c4", 1.9, 0.7, 0.55),
+  mackerel: body("#4f8f8a", "#2f6b6a", 2.3, 0.62, 0.5, [
+    ...[0, 1, 2].map((i) => part(G.box, { color: "#1f4a4a", pos: [0.12 - i * 0.12, 0.08, 0], scale: [0.03, 0.05, 0.16] })),
+    part(G.ico(0.1, 0), { color: "#e9eef0", pos: [0, -0.05, 0], scale: [2.6, 0.4, 0.9] }),
+  ]),
+  flatfish: merge([
+    part(G.ico(0.2, 1), { color: "#8a7458", scale: [1.4, 0.22, 1.05] }),
+    part(G.cone(0.1, 0.16, 4), { color: "#6e5a44", pos: [-0.32, 0, 0], rot: [0, 0, Math.PI / 2], scale: [1, 1, 0.25] }),
+    part(G.box, { color: "#1b2733", pos: [0.14, 0.05, 0.05], scale: [0.03, 0.03, 0.03] }),
+    part(G.box, { color: "#1b2733", pos: [0.18, 0.05, 0.1], scale: [0.03, 0.03, 0.03] }),
+  ]),
+  bigfish: body("#e3897a", "#c4654f", 1.9, 0.85, 0.55),
+  squid: merge([
+    part(G.cone(0.13, 0.5, 6), { color: "#f1d6cf", pos: [0.1, 0, 0], rot: [0, 0, -Math.PI / 2] }),
+    part(G.cone(0.1, 0.12, 4), { color: "#e7bdb2", pos: [0.36, 0, 0], rot: [0, 0, -Math.PI / 2], scale: [1, 0.3, 1.6] }),
+    ...[0, 1, 2, 3, 4].map((i) => part(G.cyl(0.015, 0.008, 0.32, 3), { color: "#e7bdb2", pos: [-0.3, Math.cos(i * 1.26) * 0.05, Math.sin(i * 1.26) * 0.05], rot: [0, 0, Math.PI / 2 + Math.cos(i * 1.26) * 0.25] })),
+    ...eyes(-0.08, 0.06, 0.09),
+  ]),
+  tuna: body("#36557a", "#26405e", 2.4, 0.95, 0.7, [
+    part(G.ico(0.12, 0), { color: "#c9d4dd", pos: [0.02, -0.07, 0], scale: [2.8, 0.45, 1.1] }),
+    part(G.cone(0.06, 0.2, 3), { color: "#26405e", pos: [0, 0.18, 0], scale: [1.2, 1, 0.3] }),
+    part(G.cone(0.04, 0.1, 3), { color: "#e3b33a", pos: [-0.26, 0.1, 0], scale: [1, 1, 0.3] }),
+  ]),
+};
+const FISH_SCALE: Record<FishKind, number> = { fish: 1, mackerel: 1.1, flatfish: 1.25, bigfish: 1.7, squid: 1.3, tuna: 2.6 };
+/** 몇 초마다 뛰어오르는지 (0이면 뛰지 않음) · 얼마나 높이 */
+const JUMP: Record<FishKind, [number, number]> = { fish: [18, 0.8], mackerel: [12, 0.9], flatfish: [0, 0], bigfish: [26, 1.1], squid: [0, 0], tuna: [20, 1.8] };
+const DEPTH: Record<FishKind, number> = { fish: -0.32, mackerel: -0.38, flatfish: -0.55, bigfish: -0.4, squid: -0.5, tuna: -0.7 };
 
 export function FishSchool({ terrain }: { terrain: Terrain }) {
   const rt = useRuntime();
   const version = useWorldVersion(200);
   const groups = useRef(new Map<number, THREE.Group>());
-  const disp = useRef(new Map<number, Disp & { jump: number }>());
-  const list = useMemo(() => (rt.world ? rt.world.fish.map((f) => ({ id: f.id, big: f.kind === "bigfish" })) : []),
+  const disp = useRef(new Map<number, Disp & { air: boolean }>());
+  const list = useMemo(() => (rt.world ? rt.world.fish.map((f) => ({ id: f.id, kind: (FISH_GEO[f.kind] ? f.kind : "fish") as FishKind })) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [version]);
 
@@ -250,33 +289,49 @@ export function FishSchool({ terrain }: { terrain: Terrain }) {
     const w = rt.world;
     if (!w) return;
     const t = state.clock.elapsedTime;
+    // 섬의 시각으로 정하므로 함께 보는 사람 모두 같은 순간에 뛰어오르는 것을 본다
+    const rs = env.time / TIME_SCALE;
     const drag = rt.dragLocal;
     for (const f of w.fish) {
       const g = groups.current.get(f.id);
       if (!g) continue;
+      const kind = (FISH_GEO[f.kind] ? f.kind : "fish") as FishKind;
       const local = drag && drag.k === "fish" && drag.id === f.id;
       const tx = local ? drag.x : f.x, tz = local ? drag.z : f.z;
       let d = disp.current.get(f.id);
-      if (!d) disp.current.set(f.id, (d = { x: tx, z: tz, r: f.rot, seen: true, jump: t + 5 + Math.random() * 30 }));
+      if (!d) disp.current.set(f.id, (d = { x: tx, z: tz, r: f.rot, seen: true, air: false }));
       follow(d, tx, tz, dt, local ? 25 : 5);
       d.r = lerpAngle(d.r, f.rot, 1 - Math.exp(-dt * 3));
       const held = local || f.st === "held";
-      let y = -0.32 + Math.sin(t * 2 + f.id) * 0.04;
-      let rz = Math.sin(t * 8 + f.id) * 0.08;
+      let y = DEPTH[kind] + Math.sin(t * 2 + f.id) * 0.04;
+      let rz = Math.sin(t * (kind === "tuna" ? 5 : 8) + f.id) * 0.08;
       let rx = 0;
+      let air = false;
       if (f.st === "stun") {
         y = 0.02;
         rx = Math.PI;
       } else if (held) {
         y = Math.max(0, terrain.height(d.x, d.z)) + 1.3;
         rz = Math.sin(t * 14) * 0.5;
-      } else if (t > d.jump) {
-        // 가끔 물 위로 뛰어오른다
-        const k = t - d.jump;
-        if (k < 0.9) {
-          y = -0.3 + Math.sin((k / 0.9) * Math.PI) * 0.9;
-          rz = Math.cos((k / 0.9) * Math.PI) * 0.9;
-        } else d.jump = t + 8 + Math.random() * 40;
+      } else if (kind === "squid") {
+        // 오징어는 몸을 움츠렸다 펴며 나아간다
+        rz = 0;
+        g.scale.setScalar(FISH_SCALE.squid * (1 + Math.sin(t * 3 + f.id) * 0.08));
+      } else if (JUMP[kind][0] > 0) {
+        const [period, height] = JUMP[kind];
+        const dur = kind === "tuna" ? 1.3 : 0.9;
+        const k = (rs + ((f.id * 7.31) % period)) % period;
+        if (k < dur && f.st === "swim") {
+          const u = k / dur;
+          y = DEPTH[kind] + Math.sin(u * Math.PI) * (height - DEPTH[kind]);
+          rz = Math.cos(u * Math.PI) * 0.9;
+          air = true;
+        }
+      }
+      // 물을 박차고 오를 때와 떨어질 때 물보라
+      if (air !== d.air) {
+        d.air = air;
+        rt.localFx.push({ type: "splash", x: d.x, z: d.z });
       }
       g.position.set(d.x, y, d.z);
       g.rotation.set(rx, -d.r, rz);
@@ -285,10 +340,10 @@ export function FishSchool({ terrain }: { terrain: Terrain }) {
 
   return (
     <group>
-      {list.map(({ id, big }) => (
+      {list.map(({ id, kind }) => (
         <group
           key={id}
-          scale={big ? 1.7 : 1}
+          scale={FISH_SCALE[kind]}
           ref={(g) => {
             if (g) groups.current.set(id, g);
             else {
@@ -297,7 +352,7 @@ export function FishSchool({ terrain }: { terrain: Terrain }) {
             }
           }}
         >
-          <mesh geometry={big ? BIGFISH_GEO : FISH_GEO} material={vcMat} />
+          <mesh geometry={FISH_GEO[kind]} material={vcMat} />
         </group>
       ))}
     </group>

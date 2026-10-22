@@ -1,6 +1,6 @@
 "use client";
 import { useFrame } from "@react-three/fiber";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Terrain as TerrainData } from "@/sim/terrain";
 import { env } from "./env";
@@ -26,12 +26,12 @@ const frag = /* glsl */ `
 #include <fog_pars_fragment>
 uniform sampler2D uHeight; uniform float uTime; uniform float uSize;
 uniform vec3 uDeep; uniform vec3 uShallow; uniform vec3 uFoam; uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;
-uniform float uLight; uniform float uSun; uniform float uGloom;
+uniform float uLight; uniform float uSun; uniform float uGloom; uniform float uFlood;
 varying vec3 vWorld; varying float vWave;
 void main() {
   vec2 uv = (vWorld.xz + uSize * 0.5) / uSize;
   float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
-  float h = mix(-8.0, texture2D(uHeight, uv).r * 24.0 - 8.0, inside);
+  float h = mix(-8.0, texture2D(uHeight, uv).r * 24.0 - 8.0, inside) - uFlood;
   float depth = clamp(-h / 5.0, 0.0, 1.0);
   vec3 col = mix(uShallow, uDeep, smoothstep(0.02, 0.85, depth));
   // 해안의 물거품
@@ -86,6 +86,7 @@ export function Water({ terrain }: { terrain: TerrainData }) {
             uLight: { value: 1 },
             uSun: { value: 1 },
             uGloom: { value: 0 },
+            uFlood: { value: 0 },
           },
         ]),
       }),
@@ -93,6 +94,7 @@ export function Water({ terrain }: { terrain: TerrainData }) {
   );
   mat.uniforms.uHeight.value = tex;
 
+  const sea = useRef<THREE.Mesh>(null);
   const pondMat = useMemo(
     () => new THREE.MeshStandardMaterial({ color: "#3fa7b5", transparent: true, opacity: 0.78, roughness: 0.15, metalness: 0.1 }),
     [],
@@ -109,14 +111,16 @@ export function Water({ terrain }: { terrain: TerrainData }) {
     (u.uSunCol.value as THREE.Color).copy(env.sunColor);
     u.uLight.value = 0.22 + 0.85 * env.day * (1 - gloom * 0.45) + env.flash * 0.8 + env.night * 0.08;
     u.uSun.value = env.day * (1 - env.cloud * 0.85);
-    u.uWave.value = 0.1 + env.wind * 0.25 + env.storm * 0.35;
+    u.uWave.value = 0.1 + env.wind * 0.25 + env.storm * 0.35 + Math.max(0, env.flood) * 0.12;
+    u.uFlood.value = env.flood;
+    if (sea.current) sea.current.position.y = env.flood;
     pondMat.color.set("#3fa7b5").multiplyScalar(0.35 + 0.65 * env.day);
   });
 
   const { pond } = terrain;
   return (
     <>
-      <mesh rotation-x={-Math.PI / 2} position-y={0} material={mat} renderOrder={2}>
+      <mesh ref={sea} rotation-x={-Math.PI / 2} position-y={0} material={mat} renderOrder={2}>
         <planeGeometry args={[1400, 1400, 220, 220]} />
       </mesh>
       <mesh rotation-x={-Math.PI / 2} position={[pond.x, pond.level, pond.z]} material={pondMat} renderOrder={2}>

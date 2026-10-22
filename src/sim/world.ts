@@ -1,11 +1,12 @@
-import { CHRONICLE_LIMIT, HOUR, ISLAND_RADIUS, SCHEMA_VERSION, START_HOUR, YEAR } from "./constants";
+import { CHRONICLE_LIMIT, DAY, HOUR, ISLAND_RADIUS, SCHEMA_VERSION, START_HOUR, YEAR } from "./constants";
 import { dayOf } from "./clock";
+import { FISH_INFO } from "./data";
 import { clamp } from "./noise";
-import { chance, gauss, int, pick, rand, range, RngHolder } from "./rng";
+import { chance, gauss, int, pick, rand, range, RngHolder, weighted } from "./rng";
 import { getTerrain, Terrain } from "./terrain";
 import { josa, randomName } from "./text";
 import type {
-  Animal, AnimalKind, ChronicleKind, Emotion, Fish, FxType, Item, Person, Plant, PlantKind, Res, Rock,
+  Animal, AnimalKind, ChronicleKind, Emotion, Fish, FishKind, FxType, Item, Person, Plant, PlantKind, Res, Rock,
   RockKind, Stock, Structure, StructureType, Trait, WorldState,
 } from "./types";
 
@@ -17,6 +18,7 @@ export function addFx(w: WorldState, type: FxType, x: number, z: number, ref?: n
 
 export function chron(w: WorldState, k: ChronicleKind, text: string) {
   w.chronicle.push({ t: w.time, k, text: `${dayOf(w.time)}일째 · ${text}` });
+  w.stats.chron = (w.stats.chron ?? w.chronicle.length - 1) + 1;
   if (w.chronicle.length > CHRONICLE_LIMIT) {
     // 날씨·계절 같은 가벼운 기록부터 지운다
     const light = w.chronicle.findIndex((c) => c.k === "weather" || c.k === "season");
@@ -51,7 +53,9 @@ export function missing(w: WorldState, cost: Stock): Stock {
 }
 
 export const knows = (w: WorldState, tech: string) => w.tech.known.includes(tech);
-export const living = (w: WorldState) => w.people.filter((p) => p.alive);
+/** 섬에 있는 산 사람 (바다 건너 나가 있는 사람은 빼고) */
+export const living = (w: WorldState) => w.people.filter((p) => p.alive && !p.away);
+export const onIsland = (p: Person) => !!p.alive && !p.away;
 
 export const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
 
@@ -98,14 +102,40 @@ export function makeAnimal(w: WorldState, kind: AnimalKind, x: number, z: number
   return { id: newId(w), kind, x, z, rot: rand(w) * Math.PI * 2, st: "idle", tx: x, tz: z, until: w.time, born, tame: 0, gift: 0, held: null };
 }
 
-export function makeFish(w: WorldState, T: Terrain): Fish | null {
-  const p = T.randomWaterPoint(w, 0.5, 3.4);
+const FISH_W = Object.fromEntries(Object.entries(FISH_INFO).map(([k, f]) => [k, f.w])) as Record<FishKind, number>;
+
+export function makeFish(w: WorldState, T: Terrain, kind?: FishKind, near?: { x: number; z: number }): Fish | null {
+  const k = kind ?? weighted(w, FISH_W);
+  const [d0, d1] = FISH_INFO[k].depth;
+  let p: { x: number; z: number } | null = null;
+  if (near) {
+    const x = near.x + range(w, -1.5, 1.5), z = near.z + range(w, -1.5, 1.5);
+    const h = T.height(x, z);
+    if (h < -d0 * 0.8 && h > -d1 * 1.2) p = { x, z };
+  }
+  p ??= T.randomWaterPoint(w, d0, d1);
   if (!p) return null;
-  const big = chance(w, 0.18);
   return {
-    id: newId(w), kind: big ? "bigfish" : "fish", x: p.x, z: p.z, rot: rand(w) * Math.PI * 2, st: "swim",
+    id: newId(w), kind: k, x: p.x, z: p.z, rot: rand(w) * Math.PI * 2, st: "swim",
     tx: p.x, tz: p.z, until: w.time, dies: w.time + range(w, 1, 2.5) * 86400, gift: 0, held: null,
   };
+}
+
+/** 물고기를 한 마리(고등어는 떼로) 풀어 놓고 몇 마리인지 돌려준다 */
+export function spawnFish(w: WorldState, T: Terrain) {
+  const f = makeFish(w, T);
+  if (!f) return 0;
+  w.fish.push(f);
+  if (f.kind !== "mackerel") return 1;
+  let n = 1;
+  for (let i = 0; i < 2; i++) {
+    const g = makeFish(w, T, "mackerel", f);
+    if (g) {
+      w.fish.push(g);
+      n++;
+    }
+  }
+  return n;
 }
 
 export function makeItem(w: WorldState, res: Res, qty: number, x: number, z: number, gift = 0): Item {
@@ -135,6 +165,11 @@ export function createPerson(
     neuroticism: inherit("neuroticism"),
   };
   const { openness: O, extraversion: E, agreeableness: A, neuroticism: N } = traits;
+  // 뜻: 아이는 부모를 닮고, 어른은 성격에서 비롯된다
+  const pv = par.length === 2 && par[0].vals && par[1].vals ? [par[0].vals, par[1].vals] : null;
+  const vals: [number, number] = pv
+    ? [clamp((pv[0][0] + pv[1][0]) / 2 + gauss(w, 0, 0.08), 0, 1), clamp((pv[0][1] + pv[1][1]) / 2 + gauss(w, 0, 0.08), 0, 1)]
+    : [clamp(0.15 + 0.7 * O - 0.2 * traits.conscientiousness + gauss(w, 0, 0.14), 0, 1), clamp(0.2 + 0.6 * A + 0.15 * E + gauss(w, 0, 0.14), 0, 1)];
   const sens: Record<Emotion, number> = {
     joy: 0.6 + 0.5 * E + rand(w) * 0.3,
     sadness: 0.5 + 0.7 * N + rand(w) * 0.3,
@@ -186,6 +221,12 @@ export function createPerson(
     cause: "",
     lastThought: 0,
     seen: {},
+    ill: 0,
+    group: null,
+    role: null,
+    vals,
+    core: [vals[0], vals[1]],
+    away: null,
   };
 }
 
@@ -223,50 +264,17 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     stats: { births: 0, deaths: 0, arrivals: 1, maxPop: 1, generation: 1, created: createdAt },
     timers: { castaway: 0, fish: 0, day: 1, strike: 0, animals: 0 },
     fx: [],
+    groups: [],
+    disaster: null,
+    history: { quake: 0, typhoon: 0, tsunami: 0, sick: 0, wars: 0, lastDisaster: 0, lastType: null },
+    found: [],
+    deposits: [],
+    voyages: [],
   };
 
-  // 식물
-  const big: { x: number; z: number }[] = [];
-  const small: { x: number; z: number }[] = [];
-  const R = ISLAND_RADIUS * 1.25;
-  for (let k = 0; k < 4200; k++) {
-    const x = range(w, -R, R), z = range(w, -R, R);
-    const b = T.biome(x, z);
-    const h = T.height(x, z);
-    if (b === "deep" || b === "shallow" || b === "pond") continue;
-    if (T.inPond(x, z, 1.2)) continue;
-    const roll = rand(w);
-    let kind: PlantKind | null = null;
-    if (b === "beach") {
-      if (h > 0.45 && roll < 0.05) kind = "palm";
-      else if (roll < 0.065) kind = "fiber";
-    } else if (b === "grass") {
-      if (roll < 0.03) kind = "tree";
-      else if (roll < 0.045) kind = "fruit";
-      else if (roll < 0.07) kind = "bush";
-      else if (roll < 0.1) kind = "fiber";
-      else if (roll < 0.105) kind = "herb";
-      else if (h < 2.2 && roll < 0.12) kind = "palm";
-    } else if (b === "forest") {
-      if (roll < (h > 6 ? 0.08 : 0.15)) kind = h > 6 ? "pine" : "tree";
-      else if (roll < 0.2 && h > 6) kind = "pine";
-      else if (roll < 0.22) kind = "fruit";
-      else if (roll < 0.26) kind = "bush";
-      else if (roll < 0.28) kind = "fiber";
-      else if (roll < 0.29) kind = "herb";
-    } else if (b === "rock") {
-      if (h < 11 && roll < 0.035) kind = "pine";
-    }
-    if (!kind) continue;
-    const isBig = kind === "palm" || kind === "tree" || kind === "pine" || kind === "fruit";
-    if (!spacedOk(big, x, z, isBig ? 2.6 : 1.4)) continue;
-    if (!spacedOk(small, x, z, 1.1)) continue;
-    (isBig ? big : small).push({ x, z });
-    const p = makePlant(w, kind, x, z, chance(w, 0.85) ? 1 : range(w, 0.3, 0.9));
-    if (kind === "palm" || kind === "fruit") p.fruit = int(w, 0, 3);
-    if (kind === "bush") p.fruit = int(w, 2, 6);
-    w.plants.push(p);
-  }
+  // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
+  plantFlora(w, T, 1.7);
+  const big = w.plants.filter((p) => isBigPlant(p.kind));
 
   // 바위
   const rocks: { x: number; z: number }[] = [];
@@ -289,23 +297,11 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     const d = Math.hypot(x - T.pond.x, z - T.pond.z);
     return d > T.pond.r + 1 && d < T.pond.r + 4;
   });
+  w.deposits = makeDeposits(w, T);
 
-  // 동물
-  const spawnAnimals = (kind: AnimalKind, n: number, ok: (b: string, x: number, z: number) => boolean) => {
-    for (let i = 0; i < n; i++) {
-      const pt = T.randomPoint(w, (x, z, b) => ok(b, x, z));
-      if (pt) w.animals.push(makeAnimal(w, kind, pt.x, pt.z, w.time - range(w, 0.5, 2) * YEAR));
-    }
-  };
-  spawnAnimals("rabbit", 8, (b) => b === "grass" || b === "forest");
-  spawnAnimals("boar", 4, (b) => b === "forest");
-  spawnAnimals("goat", 4, (b, x, z) => b === "rock" || (b === "grass" && T.height(x, z) > 5));
-  spawnAnimals("crab", 6, (b) => b === "beach");
-  spawnAnimals("fowl", 4, (b) => b === "grass" || b === "forest");
-  for (let i = 0; i < 10; i++) {
-    const f = makeFish(w, T);
-    if (f) w.fish.push(f);
-  }
+  // 동물과 물고기
+  spawnFauna(w, T, 1.7);
+  for (let n = 0; n < 17; ) n += spawnFish(w, T) || 1;
 
   // 표류자와 야영지
   const { person, camp } = spawnCastaway(w, T, 26 + int(w, 0, 8), undefined, true);
@@ -315,6 +311,119 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
   w.people.push(person);
   chron(w, "arrive", `${josa(person.name, "이/가")} 무인도의 해변에서 눈을 떴다.`);
   w.timers.castaway = w.time + 4 * 86400;
+  w.timers.disaster = w.time + 30 * DAY;
+  return w;
+}
+
+const isBigPlant = (k: PlantKind) => k === "palm" || k === "tree" || k === "pine" || k === "fruit";
+
+/** 섬에 식물을 흩뿌린다. D는 밀도 배율, avoid는 피할 자리 */
+function plantFlora(w: WorldState, T: Terrain, D: number, avoid?: (x: number, z: number) => boolean) {
+  const big: { x: number; z: number }[] = [];
+  const small: { x: number; z: number }[] = [];
+  for (const p of w.plants) (isBigPlant(p.kind) ? big : small).push(p);
+  const R = ISLAND_RADIUS * 1.25;
+  for (let k = 0; k < 4200; k++) {
+    const x = range(w, -R, R), z = range(w, -R, R);
+    const b = T.biome(x, z);
+    const h = T.height(x, z);
+    if (b === "deep" || b === "shallow" || b === "pond") continue;
+    if (T.inPond(x, z, 1.2)) continue;
+    const roll = rand(w);
+    let kind: PlantKind | null = null;
+    if (b === "beach") {
+      if (h > 0.45 && roll < 0.05 * D) kind = "palm";
+      else if (roll < 0.065 * D) kind = "fiber";
+    } else if (b === "grass") {
+      if (roll < 0.03 * D) kind = "tree";
+      else if (roll < 0.045 * D) kind = "fruit";
+      else if (roll < 0.07 * D) kind = "bush";
+      else if (roll < 0.1 * D) kind = "fiber";
+      else if (roll < 0.11 * D) kind = "herb";
+      else if (h < 2.2 && roll < 0.125 * D) kind = "palm";
+    } else if (b === "forest") {
+      if (roll < (h > 6 ? 0.08 : 0.15) * D) kind = h > 6 ? "pine" : "tree";
+      else if (roll < 0.2 * D && h > 6) kind = "pine";
+      else if (roll < 0.22 * D) kind = "fruit";
+      else if (roll < 0.26 * D) kind = "bush";
+      else if (roll < 0.28 * D) kind = "fiber";
+      else if (roll < 0.3 * D) kind = "herb";
+    } else if (b === "rock") {
+      if (h < 11 && roll < 0.035 * D) kind = "pine";
+    }
+    if (!kind) continue;
+    const isBig = isBigPlant(kind);
+    if (!spacedOk(big, x, z, isBig ? 2.4 : 1.3)) continue;
+    if (!spacedOk(small, x, z, 1.0)) continue;
+    if (avoid?.(x, z)) continue;
+    (isBig ? big : small).push({ x, z });
+    const p = makePlant(w, kind, x, z, chance(w, 0.85) ? 1 : range(w, 0.3, 0.9));
+    if (kind === "palm" || kind === "fruit") p.fruit = int(w, 0, 3);
+    if (kind === "bush") p.fruit = int(w, 2, 6);
+    w.plants.push(p);
+  }
+}
+
+const FAUNA: [AnimalKind, number, (T: Terrain, b: string, x: number, z: number) => boolean][] = [
+  ["rabbit", 8, (_, b) => b === "grass" || b === "forest"],
+  ["boar", 4, (_, b) => b === "forest"],
+  ["goat", 4, (T, b, x, z) => b === "rock" || (b === "grass" && T.height(x, z) > 5)],
+  ["crab", 6, (_, b) => b === "beach"],
+  ["fowl", 4, (_, b) => b === "grass" || b === "forest"],
+];
+
+function spawnFauna(w: WorldState, T: Terrain, mul: number) {
+  for (const [kind, n, ok] of FAUNA) {
+    for (let i = 0; i < Math.round(n * mul); i++) {
+      const pt = T.randomPoint(w, (x, z, b) => ok(T, b, x, z));
+      if (pt) w.animals.push(makeAnimal(w, kind, pt.x, pt.z, w.time - range(w, 0.5, 2) * YEAR));
+    }
+  }
+}
+
+/** 땅속에 숨은 약돌 광맥: 산자락의 바위 지대와 숲 */
+function makeDeposits(w: WorldState, T: Terrain) {
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0, guard = 0; i < 5 && guard < 400; guard++) {
+    const pt = T.randomPoint(w, (x, z, b) => (b === "rock" || b === "forest" || (b === "grass" && T.height(x, z) > 4)) && T.slopeAt(x, z) < 0.8, 40);
+    if (!pt || out.some((d) => dist(d.x, d.z, pt.x, pt.z) < 14)) continue;
+    out.push(pt);
+    i++;
+  }
+  return out;
+}
+
+/** 예전 저장본을 지금 규칙에 맞춘다 */
+export function migrateWorld(w: WorldState) {
+  const T = getTerrain(w.seed);
+  const old = (w.v ?? 1) < 2;
+  w.groups ??= [];
+  w.disaster ??= null;
+  w.history ??= { quake: 0, typhoon: 0, tsunami: 0, sick: 0, wars: 0, lastDisaster: 0, lastType: null };
+  w.found ??= [];
+  w.voyages ??= [];
+  w.deposits ??= makeDeposits(w, T);
+  w.timers.disaster ??= w.time + 10 * DAY;
+  for (const p of w.people) {
+    p.ill ??= 0;
+    p.group ??= null;
+    p.role ??= null;
+    p.away ??= null;
+    if (!p.vals) {
+      const { openness: O, conscientiousness: C, agreeableness: A, extraversion: E } = p.traits;
+      p.vals = [clamp(0.15 + 0.7 * O - 0.2 * C + gauss(w, 0, 0.14), 0, 1), clamp(0.2 + 0.6 * A + 0.15 * E + gauss(w, 0, 0.14), 0, 1)];
+    }
+    p.core ??= [p.vals[0], p.vals[1]];
+  }
+  if (old) {
+    // 동식물을 새 기준(1.7배)에 맞춰 한 번 더 채운다
+    const busy = (x: number, z: number) => dist(x, z, w.camp.x, w.camp.z) < 9 || w.structures.some((s) => dist(x, z, s.x, s.z) < 4);
+    plantFlora(w, T, 0.7, busy);
+    spawnFauna(w, T, 0.7);
+    for (let n = 0; n < 7; ) n += spawnFish(w, T) || 1;
+    w.rev++;
+  }
+  w.v = SCHEMA_VERSION;
   return w;
 }
 

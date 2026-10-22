@@ -11,7 +11,7 @@ import { findById } from "@/sim/world";
 import { useHud } from "@/game/hud";
 import { useLabelLayer, useRuntime, useWorldVersion } from "./context";
 import { follow, lerpAngle } from "./env";
-import { flat } from "./geo";
+import { flat, G, merge, part, vcMat } from "./geo";
 
 const SKIN = ["#f6d7c3", "#eec1a0", "#dfa984", "#c08560", "#946042"];
 const HAIR = ["#2b211c", "#4a3426", "#7a5230", "#c9a16a", "#1c1c1c", "#9b3b26", "#5a4030"];
@@ -42,8 +42,18 @@ const CARRY_COLOR: Record<string, string> = {
   berry: "#c2265a", fruit: "#e9823a", meat: "#d77a7a", fish: "#8fb8d6", crop: "#d9c25a",
 };
 
+/** 먼바다로 고기잡이 갈 때 타는 작은 배 */
+const boatGeo = merge([
+  part(G.box, { color: "#a0683f", pos: [0, -0.05, 0], scale: [2.1, 0.32, 0.85] }),
+  part(G.cone(0.42, 0.6, 4), { color: "#a0683f", pos: [1.3, -0.05, 0], rot: [0, 0, -Math.PI / 2], scale: [1, 1, 0.72] }),
+  part(G.box, { color: "#c9a26b", pos: [0, 0.13, 0], scale: [1.9, 0.05, 0.7] }),
+  part(G.box, { color: "#7a5235", pos: [-0.4, 0.2, 0], scale: [0.25, 0.12, 0.72] }),
+  part(G.cyl(0.025, 0.025, 1.6, 3), { color: "#7a5235", pos: [0.1, 0.25, 0.5], rot: [0.5, 0, 1.2] }),
+]);
+
 interface Rig {
   root: THREE.Group;
+  boat: THREE.Mesh;
   body: THREE.Group;
   torso: THREE.Group;
   head: THREE.Group;
@@ -109,6 +119,16 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     if (!w || !r.root) return;
     const p = findById(w.people, id);
     if (!p) return;
+    // 섬 밖에 나가 있는 동안은 보이지 않는다
+    if (p.away) {
+      r.root.visible = false;
+      if (last.current.vis !== "none") {
+        label.el.style.display = "none";
+        last.current.vis = "none";
+      }
+      return;
+    }
+    r.root.visible = true;
     const selected = useHud.getState().selectedId === id;
     const t = state.clock.elapsedTime + phase;
     follow(disp.current, p.x, p.z, dt, 7);
@@ -116,7 +136,10 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     const yrs = ageYears(p.birth, w.time);
     const scale = 0.42 + 0.58 * Math.min(1, yrs / 16);
     const ground = terrain.height(disp.current.x, disp.current.z);
-    r.root.position.set(disp.current.x, Math.max(ground, -0.55), disp.current.z);
+    // 물 위에 있는데 헤엄치는 중이 아니면 배를 타고 있다
+    const onBoat = !!p.alive && ground < -0.35 && !(p.act?.k === "leisure" && p.act.sub === "swim");
+    r.boat.visible = onBoat;
+    r.root.position.set(disp.current.x, onBoat ? 0.14 + Math.sin(t * 1.3) * 0.05 : Math.max(ground, -0.55), disp.current.z);
     r.root.rotation.y = -disp.current.r;
     r.root.scale.setScalar(scale);
 
@@ -262,6 +285,21 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
         aR = 2.8; aRx = 0.4 + s(t * 9) * 0.35;
         break;
       }
+      case "cough": {
+        // 콜록: 고개를 숙이고 손으로 입을 가린다
+        const k = Math.max(0, s(t * 11));
+        tz = -0.15 - k * 0.25; hz = -0.2 - k * 0.3;
+        aR = 2.3; aRx = -0.5;
+        break;
+      }
+      case "fight": {
+        // 주먹을 번갈아 내지른다
+        const k = s(t * 10);
+        lL = 0.35; lR = -0.25; tz = -0.12;
+        aL = 1.5 + Math.max(0, k) * 0.9; aR = 1.5 + Math.max(0, -k) * 0.9; aLx = -0.25; aRx = 0.25;
+        by = Math.abs(s(t * 5)) * 0.05;
+        break;
+      }
       default: {
         // 숨쉬기 + 두리번
         hy = s(t * 0.5) * 0.45;
@@ -289,7 +327,15 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     // 말풍선
     const dist = camera.position.distanceTo(r.root.position);
     const el = label.el;
-    label.name.textContent = p.name;
+    // 무리의 색과 이끄는 사람 표시
+    const g = p.group != null ? w.groups.find((x) => x.id === p.group) : undefined;
+    const tag = `${p.role === "leader" ? "👑 " : ""}${p.name}`;
+    if (label.name.textContent !== tag) label.name.textContent = tag;
+    const gc = g ? `hsl(${Math.round(g.hue * 360)} 62% 55%)` : "";
+    if (label.name.dataset.gc !== gc) {
+      label.name.dataset.gc = gc;
+      label.name.style.borderBottom = gc ? `3px solid ${gc}` : "";
+    }
     head.set(r.root.position.x, r.root.position.y + (anim === "sleep" || anim === "lie" ? 0.9 : 2.2) * scale, r.root.position.z).project(camera);
     const onScreen = head.z < 1 && Math.abs(head.x) < 1.1 && Math.abs(head.y) < 1.1;
     if (onScreen) el.style.transform = `translate(${((head.x + 1) / 2) * size.width}px, ${((1 - head.y) / 2) * size.height}px) translate(-50%, -100%)`;
@@ -297,7 +343,8 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
       const bubble = p.bubble && p.bubble.until > w.time ? p.bubble : null;
       const [emo, strength] = dominant(p);
       // 평온할 때는 이모지를 숨겨 화면을 덜 어지럽힌다
-      const emoji = !p.alive ? "🕯️" : anim === "sleep" ? "💤" : bubble?.emoji || (strength > 0.35 || selected ? EMOJI[emo] ?? "" : "");
+      const sick = (p.ill ?? 0) >= 2 ? "🤒" : "";
+      const emoji = !p.alive ? "🕯️" : anim === "sleep" ? "💤" : bubble?.emoji || sick || (strength > 0.35 || selected ? EMOJI[emo] ?? "" : "");
       const text = bubble && dist < 70 ? bubble.text : "";
       const vis = dist > 150 || !onScreen ? "none" : "flex";
       if (vis !== last.current.vis) {
@@ -330,6 +377,7 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
   return (
     <group ref={set("root")}>
       <mesh ref={set("ring")} geometry={ringGeo} material={ringMat} rotation-x={-Math.PI / 2} position-y={0.05} visible={false} />
+      <mesh ref={set("boat")} geometry={boatGeo} material={vcMat} position-y={-0.12} visible={false} castShadow />
       <group ref={set("body")}>
         {/* 다리 */}
         <group ref={set("legL")} position={[0, 0.82, 0.11]}>

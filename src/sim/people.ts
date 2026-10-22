@@ -124,9 +124,11 @@ export function homeOf(w: WorldState, p: Person) {
 export function sheltered(w: WorldState, p: Person) {
   const a = p.act;
   if (!a || a.ph !== 1) return false;
-  if (a.k !== "sleep" && a.k !== "shelter") return false;
-  const h = homeOf(w, p);
-  return !!h && dist(p.x, p.z, h.x, h.z) < STRUCTS[h.type].radius + 1.5;
+  if (a.k !== "sleep" && a.k !== "shelter" && a.k !== "rest" && a.k !== "isolate") return false;
+  const h = a.k === "isolate"
+    ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1)
+    : homeOf(w, p) ?? (a.k === "rest" ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1) : undefined);
+  return !!h && (h.dmg ?? 0) < 0.6 && dist(p.x, p.z, h.x, h.z) < STRUCTS[h.type].radius + 1.5;
 }
 
 export function nearFire(ctx: Ctx, x: number, z: number, r = 4.5) {
@@ -154,14 +156,14 @@ export function updateNeeds(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   if (!inside && (ctx.weather === "rain" || ctx.weather === "storm")) target -= 15;
   if (!inside && ctx.weather === "snow") target -= 8;
   if (nearFire(ctx, p.x, p.z)) target += 50;
-  if (inside && home) target += 25 + (STRUCTS[home.type].tier ?? 1) * 5;
+  if (inside) target += (25 + (home ? STRUCTS[home.type].tier ?? 1 : 1) * 5) * (1 - (home?.dmg ?? 0) * 0.6);
   target = clamp(target, 0, 100);
   n.warmth += (target - n.warmth) * (1 - Math.exp(-dt / (1.2 * HOUR)));
   n.social -= h * (0.8 + 2.4 * p.traits.extraversion) * (asleep ? 0.3 : 1);
   n.fun -= h * (asleep ? 0.4 : 1.8);
   if (!asleep) {
     for (const q of w.people) {
-      if (q !== p && q.alive && Math.abs(q.x - p.x) < 6 && Math.abs(q.z - p.z) < 6) {
+      if (q !== p && q.alive && !q.away && Math.abs(q.x - p.x) < 6 && Math.abs(q.z - p.z) < 6) {
         n.social += h * 1.2;
         break;
       }
@@ -169,12 +171,12 @@ export function updateNeeds(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   }
   for (const k of Object.keys(n) as (keyof typeof n)[]) n[k] = clamp(n[k], 0, 100);
 
-  // 건강
+  // 건강 (앓는 동안에는 저절로 낫지 않는다)
   let dh = 0;
   if (n.hunger < 5) dh -= 4;
   if (n.thirst < 5) dh -= 8;
   if (n.warmth < 15) dh -= 3.5 * (1 - n.warmth / 15);
-  if (n.hunger > 35 && n.thirst > 35 && n.warmth > 30) dh += (asleep ? 3 : 1.2) * (knows(w, "medicine") ? 1.8 : 1);
+  if (n.hunger > 35 && n.thirst > 35 && n.warmth > 30 && (p.ill ?? 0) < 2) dh += (asleep ? 3 : 1.2) * (knows(w, "medicine") ? 1.8 : 1);
   p.health = clamp(p.health + dh * h, 0, 100);
 }
 
@@ -274,12 +276,13 @@ const CAUSE: Record<string, string> = {
   cold: "추위",
   old: "노환",
   injury: "부상",
+  ill: "병",
 };
 
 export function checkDeath(w: WorldState, T: Terrain, p: Person) {
   if (p.health > 0) return;
   const n = p.needs;
-  const cause = n.thirst < 5 ? "thirst" : n.hunger < 5 ? "hunger" : n.warmth < 15 ? "cold" : "injury";
+  const cause = n.thirst < 5 ? "thirst" : n.hunger < 5 ? "hunger" : n.warmth < 15 ? "cold" : (p.ill ?? 0) >= 2 ? "ill" : "injury";
   die(w, T, p, cause);
 }
 
@@ -292,6 +295,8 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
   p.gesture = null;
   p.bubble = null;
   p.carry = null;
+  p.ill = 0;
+  p.role = null;
   const yrs = Math.floor(age(w, p));
   w.stats.deaths++;
   if (cause === "old") chron(w, "death", `${josa(p.name, "이/가")} 평화롭게 눈을 감았다. (향년 ${yrs}세)`);
@@ -300,6 +305,7 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
   if (partner) partner.partner = null;
   p.partner = null;
   const others = living(w);
+  const abroad = w.people.some((q) => q.alive && q.away);
   for (const q of others) {
     const family = q.partner === p.id || q.parents.includes(p.id) || p.parents.includes(q.id);
     const g = Math.max(q.rel[p.id] ?? 0, family ? 0.85 : 0, others.length <= 3 ? 0.4 : 0);
@@ -309,7 +315,7 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
       say(w, q, "grief", { name: p.name }, "🕯️", true);
     }
   }
-  if (others.length === 0) {
+  if (others.length === 0 && !abroad) {
     const g = planGrave(w, T, p);
     g.prog = 1;
     g.paid = 1;
@@ -363,7 +369,7 @@ export function dailyPeople(w: WorldState, T: Terrain) {
     if (!m || !m.alive) continue;
     const yrs = age(w, f);
     if (yrs < 18 || yrs > 42) continue;
-    if (now.length >= MAX_POP) continue;
+    if (w.people.filter((q) => q.alive).length >= MAX_POP) continue;
     if (food < now.length * 3 || cap < now.length - 1) continue;
     const kids = now.filter((k) => k.parents.includes(f.id));
     if (kids.some((k) => age(w, k) < 1.5)) continue;
@@ -379,7 +385,10 @@ export function dailyPeople(w: WorldState, T: Terrain) {
 
   // 표류자
   const settled = cap > 0 && knows(w, "fire");
-  if (now.length === 0 && w.time >= w.timers.castaway) {
+  const abroad = w.people.some((q) => q.alive && q.away);
+  if (now.length === 0 && abroad) {
+    // 바다 건너 나간 사람들이 돌아오기를 기다린다
+  } else if (now.length === 0 && w.time >= w.timers.castaway) {
     arrive(w, T, true);
   } else if (now.length > 0 && now.length < 10 && w.time >= w.timers.castaway && chance(w, settled ? 0.35 : 0.12)) {
     arrive(w, T, false);
@@ -398,7 +407,7 @@ export function dailyPeople(w: WorldState, T: Terrain) {
 export function hourlyPeople(w: WorldState) {
   // 출산
   for (const f of w.people) {
-    if (!f.alive || !f.preg || w.time < f.preg) continue;
+    if (!f.alive || f.away || !f.preg || w.time < f.preg) continue;
     const father = findById(w.people, f.pregBy);
     f.preg = 0;
     const parents = father ? [f, father] : [f];
@@ -408,6 +417,7 @@ export function hourlyPeople(w: WorldState) {
     baby.needs = { hunger: 90, thirst: 90, energy: 90, warmth: 90, social: 90, fun: 80 };
     baby.health = 100;
     baby.outfit = f.outfit;
+    baby.group = f.group ?? null;
     for (const q of parents) {
       baby.rel[q.id] = 0.8;
       q.rel[baby.id] = 0.9;

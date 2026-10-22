@@ -2,7 +2,10 @@
 import { actLabel } from "@/sim/ai";
 import { ageYears, clockLabel, dayOf, seasonOf, SEASONS, timeOfDayLabel, yearOf } from "@/sim/clock";
 import { MAX_VIEWERS, SCHEMA_VERSION, SIM_TICK_MS, TIME_SCALE } from "@/sim/constants";
-import { ERAS, RES_NAME, TECH_BY_ID } from "@/sim/data";
+import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, TECH_BY_ID } from "@/sim/data";
+import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
+import { ILL_NAME } from "@/sim/disease";
+import { groupStage, groupTitle } from "@/sim/society";
 import { applyInteraction, releaseHeld } from "@/sim/interactions";
 import { dominant, mood } from "@/sim/people";
 import { hashString } from "@/sim/rng";
@@ -11,9 +14,9 @@ import { advance, step } from "@/sim/step";
 import { getTerrain, Terrain } from "@/sim/terrain";
 import { EMOJI } from "@/sim/text";
 import type { Act, Anim, Fx, Interaction, Person, Res, WorldState } from "@/sim/types";
-import { createWorld, findById } from "@/sim/world";
-import { useHud, type PersonDetail, type PersonSummary } from "./hud";
-import { Envelope, gzipBytes, LocalTransport, Member, pack, SupabaseTransport, Transport, unpack } from "./net";
+import { createWorld, findById, migrateWorld } from "@/sim/world";
+import { useHud, type GroupSummary, type PersonDetail, type PersonSummary } from "./hud";
+import { compact, Envelope, gzipBytes, LocalTransport, Member, pack, SupabaseTransport, Transport, unpack } from "./net";
 
 export interface JoinResponse {
   worldId: string;
@@ -30,6 +33,8 @@ type PersonDyn = {
   i: number; x: number; z: number; r: number; a: Anim; g: string | 0; b: [string, string, number] | 0;
   c: Res | 0; k: string; ph: number; s?: string; rs?: string; l: number;
   n?: number[]; e?: number[]; hp?: number; o?: string;
+  /** 감기 단계, 섬 밖에 나가 있는지 */
+  il?: number; aw?: 1;
 };
 
 interface Dyn {
@@ -43,6 +48,7 @@ interface Dyn {
   f: [number, number, number, number, string, string | 0][];
   i: [number, number, number, string | 0][];
   fx: Fx[];
+  ds: WorldState["disaster"];
 }
 
 const NEED_KEYS = ["hunger", "thirst", "energy", "warmth", "social", "fun"] as const;
@@ -63,19 +69,23 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift"]);
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage"]);
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
 export function normalizeWorld(raw: WorldState): WorldState {
   const w = raw;
-  w.v = SCHEMA_VERSION;
   w.fx = [];
   for (const a of w.animals) a.held = null;
   for (const f of w.fish) f.held = null;
   for (const it of w.items) it.held = null;
   w.timers ??= { castaway: 0, fish: 0, day: dayOf(w.time), strike: 0, animals: 0 };
+  // 질병·재해·무리·항해가 생기기 전의 저장본도 이어서 쓴다 (동식물도 이때 새 기준으로 채움)
+  migrateWorld(w);
+  w.v = SCHEMA_VERSION;
   return w;
 }
+
+const chronCount = (w: WorldState) => w.stats.chron ?? w.chronicle.length;
 
 export const seedOf = (worldId: string) => parseInt(worldId.slice(0, 8), 16) ^ hashString(worldId);
 
@@ -189,7 +199,7 @@ export class GameRuntime {
     }
     if (this.disposed) return;
     this.world = w;
-    this.lastChron = w.chronicle.length;
+    this.lastChron = chronCount(w);
     this.bumpVersion();
     // 자리를 비운 사이의 이야기
     if (lastSeen != null && w.time - lastSeen > 3600) {
@@ -280,6 +290,8 @@ export class GameRuntime {
           b: p.bubble ? [p.bubble.text, p.bubble.emoji, p.bubble.until] : 0,
           c: p.carry?.res ?? 0, k: p.act?.k ?? "", ph: p.act?.ph ?? 0, s: p.act?.sub, rs: p.act?.res, l: p.alive,
         };
+        if (p.ill) d.il = p.ill;
+        if (p.away) d.aw = 1;
         if (detail) {
           d.n = NEED_KEYS.map((k) => Math.round(p.needs[k]));
           d.e = EMO_KEYS.map((k) => Math.round(p.emo[k] * 100));
@@ -292,6 +304,7 @@ export class GameRuntime {
       f: w.fish.map((f) => [f.id, r1(f.x), r1(f.z), r1(f.rot), f.st, f.held ?? 0]),
       i: w.items.filter((i) => i.held).map((i) => [i.id, r1(i.x), r1(i.z), i.held ?? 0]),
       fx,
+      ds: w.disaster,
     };
   }
 
@@ -302,6 +315,7 @@ export class GameRuntime {
     w.weather = d.w;
     w.stock = d.st;
     w.tech = d.tech;
+    if (d.ds !== undefined) w.disaster = d.ds;
     let unknown = false;
     for (const q of d.p) {
       const p = findById(w.people, q.i);
@@ -322,6 +336,9 @@ export class GameRuntime {
       if (q.e) EMO_KEYS.forEach((k, i) => (p.emo[k] = q.e![i] / 100));
       if (q.hp != null) p.health = q.hp;
       if (q.o) p.outfit = q.o as Person["outfit"];
+      p.ill = q.il ?? 0;
+      if (!q.aw) p.away = null;
+      else p.away ??= { until: 0, via: "ship", trip: 0 };
     }
     for (const [id, x, z, rot, st, held] of d.a) {
       const a = findById(w.animals, id);
@@ -362,7 +379,7 @@ export class GameRuntime {
           const first = !this.world;
           this.world = normalizeWorld(w);
           this.terrain = getTerrain(w.seed);
-          if (first) this.lastChron = w.chronicle.length;
+          if (first) this.lastChron = chronCount(w);
           this.bumpVersion();
           useHud.setState({ phase: "running" });
         });
@@ -450,7 +467,7 @@ export class GameRuntime {
   async save(keepalive = false) {
     const w = this.world;
     if (!w || !this.isHost) return;
-    const body = JSON.stringify({ worldId: this.worldId, viewerId: this.viewerId, state: { ...w, fx: [] }, simTime: w.time });
+    const body = JSON.stringify({ worldId: this.worldId, viewerId: this.viewerId, state: { ...w, fx: [] }, simTime: w.time }, compact);
     try {
       const gz = await gzipBytes(body);
       const payload = gz ?? body;
@@ -538,18 +555,41 @@ export class GameRuntime {
       name: p.name,
       age: Math.floor(ageYears(p.birth, t)),
       sex: p.sex,
-      emoji: p.alive ? (p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌") : "🕯️",
-      action: p.alive ? actLabel(p.act) : "영원히 잠듦",
+      emoji: !p.alive ? "🕯️" : p.away ? (p.away.via === "ship" ? "⛵" : "🌀") : (p.ill ?? 0) >= 3 ? "🤒" : p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌",
+      action: !p.alive ? "영원히 잠듦" : p.away ? (p.away.via === "ship" ? "바다 건너 항해 중" : "차원문 너머 여행 중") : actLabel(p.act),
       alive: !!p.alive,
+      group: p.group ?? null,
+      role: p.role ? ROLE_ICON[p.role] : "",
+      ill: p.ill ?? 0,
+      away: !!p.away,
     }));
+    const groups: GroupSummary[] = w.groups.map((g) => {
+      const foe = g.war ? findById(w.groups, g.war.with) : undefined;
+      const members = w.people.filter((p) => p.alive && p.group === g.id);
+      return {
+        id: g.id,
+        kind: g.kind,
+        title: groupTitle(w, g),
+        stage: groupStage(w, g),
+        hue: g.hue,
+        count: members.length,
+        leader: findById(w.people, g.leader)?.name ?? "",
+        war: foe ? groupTitle(w, foe) : null,
+        apart: !!g.camp,
+        members: members.map((p) => p.id),
+      };
+    });
+    const D = w.disaster;
     const sel = hud.selectedId != null ? findById(w.people, hud.selectedId) : undefined;
     const focus = w.tech.focus;
     const toasts = hud.toasts.filter((x) => Date.now() - x.at < 7000);
-    if (w.chronicle.length < this.lastChron) this.lastChron = 0;
-    for (; this.lastChron < w.chronicle.length; this.lastChron++) {
-      const c = w.chronicle[this.lastChron];
+    const total = chronCount(w);
+    if (total < this.lastChron) this.lastChron = total;
+    const fresh = Math.min(total - this.lastChron, w.chronicle.length);
+    for (const c of w.chronicle.slice(w.chronicle.length - fresh)) {
       if (TOAST_KINDS.has(c.k)) toasts.push({ id: ++this.toastId, text: c.text, kind: c.k, at: Date.now() });
     }
+    this.lastChron = total;
     useHud.setState({
       day: dayOf(t),
       year: yearOf(t),
@@ -559,7 +599,13 @@ export class GameRuntime {
       weather: w.weather.type,
       temp: Math.round(w.weather.temp),
       era: ERAS[currentEra(w)],
-      pop: w.people.filter((p) => p.alive).length,
+      pop: w.people.filter((p) => p.alive && !p.away).length,
+      abroad: w.people.filter((p) => p.alive && p.away).length,
+      groups,
+      disaster: D && t >= D.start - (D.warned ? 6 * 3600 : 0) && t <= D.until
+        ? { name: DISASTER_NAME[D.type], icon: DISASTER_ICON[D.type], coming: t < D.start }
+        : null,
+      war: groups.some((g) => g.war),
       generation: w.stats.generation,
       people: summaries,
       selected: sel ? this.detail(sel) : null,
@@ -607,12 +653,15 @@ export class GameRuntime {
       .slice(0, 3)
       .map(([k, v]) => `${SKILL_LABEL[k] ?? k} ${"★".repeat(Math.max(1, Math.round((v ?? 0) * 5)))}`);
     const home = findById(w.structures, p.home);
+    const g = p.group != null ? findById(w.groups, p.group) : undefined;
+    const v = p.vals ?? [0.5, 0.5];
+    const view = [v[0] > 0.6 ? "새로운 것을 좇음" : v[0] < 0.4 ? "옛 방식을 지킴" : "", v[1] > 0.6 ? "함께함을 중히 여김" : v[1] < 0.4 ? "홀로 서기를 좋아함" : ""].filter(Boolean);
     return {
       id: p.id,
       name: p.name,
       age: Math.floor(ageYears(p.birth, w.time)),
       sex: p.sex,
-      emoji: EMOJI[emo] ?? "😌",
+      emoji: (p.ill ?? 0) >= 3 ? "🤒" : EMOJI[emo] ?? "😌",
       action: p.alive ? actLabel(p.act) : "영원히 잠듦",
       alive: !!p.alive,
       needs: { ...p.needs },
@@ -627,8 +676,15 @@ export class GameRuntime {
       skills,
       outfit: p.outfit,
       carry: p.carry ? RES_NAME[p.carry.res] : "",
-      home: home ? (home.type === "leanto" ? "움막" : home.type === "hut" ? "오두막" : home.type === "loghouse" ? "통나무집" : "돌집") : "집 없음",
+      home: home ? (home.type === "leanto" ? "움막" : home.type === "hut" ? "오두막" : home.type === "loghouse" ? "통나무집" : "돌집") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
       preg: !!p.preg,
+      group: p.group ?? null,
+      role: p.role ? `${ROLE_ICON[p.role]} ${ROLE_NAME[p.role]}` : "",
+      ill: p.ill ?? 0,
+      illName: p.ill ? (p.flu && p.ill === 2 ? "독감 기운" : ILL_NAME[p.ill]) : "",
+      away: !!p.away,
+      groupName: g ? `${groupTitle(w, g)} · ${groupStage(w, g)}` : "",
+      view: view.length ? view.join(" · ") : "중도",
     };
   }
 }

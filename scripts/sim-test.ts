@@ -16,7 +16,9 @@ const dt = fine ? 7.2 : 600;
 for (let d = 0; d < days; d++) {
   const end = w.time + DAY;
   while (w.time < end) step(w, dt);
-  for (; lastChron < w.chronicle.length; lastChron++) console.log("  " + w.chronicle[lastChron].text);
+  const total = w.stats.chron ?? 0;
+  for (const c of w.chronicle.slice(w.chronicle.length - Math.min(total - lastChron, w.chronicle.length))) console.log("  " + c.text);
+  lastChron = total;
   const alive = w.people.filter((p) => p.alive);
   const s = Object.entries(w.stock).filter(([, v]) => (v ?? 0) >= 1).map(([k, v]) => `${k}:${Math.floor(v!)}`).join(" ");
   console.log(

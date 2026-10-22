@@ -1,7 +1,9 @@
 // 규칙 기반 Utility AI: 욕구·감정·성격·마을 상황을 점수로 바꿔 가장 높은 행동을 고른다.
 import { DAY, HOUR, MIN, WALK_SPEED } from "./constants";
 import { seasonOf } from "./clock";
-import { FOOD, RECIPES, Recipe, RES_NAME, STRUCTS } from "./data";
+import { FISH_INFO, FOOD, RECIPES, Recipe, RES_NAME, STRUCTS, TECH_BY_ID } from "./data";
+import { countermeasure, damaged, floodPeak, repairCost, tsunamiThreat } from "./disaster";
+import { discoverIngredient, giveMed, illOf, infect, infirmary, isolated, medForP } from "./disease";
 import { isTree } from "./ecology";
 import { clamp } from "./noise";
 import {
@@ -9,12 +11,15 @@ import {
 } from "./people";
 import { chance, int, rand, range } from "./rng";
 import {
-  addResearch, buildMul, carryCap, completeStructure, houseCapacity, isHouse, projects, toolMul,
+  addResearch, assignHomes, blockedByFound, buildMul, carryCap, completeStructure, houseCapacity, isHouse, projects, toolMul,
 } from "./settlement";
-import type { Act, ActKind, Anim, Animal, Person, Plant, Res, Stock, Structure, WorldState } from "./types";
+import { campOf, easeWar, enemies, socialize, warOf } from "./society";
+import { josa } from "./text";
+import type { Act, ActKind, Anim, Animal, Person, Plant, Res, Role, Stock, Structure, WorldState } from "./types";
+import { boardPoint, voyageOf } from "./voyage";
 import {
-  addFx, addStock, bump, dist, findById, hasStock, knows, living, makePlant, makeStructure, nearest, payStock,
-  removeById, stockOf,
+  addFx, addStock, bump, chron, dist, findById, hasStock, knows, living, makePlant, makeStructure, nearest, onIsland,
+  payStock, removeById, stockOf,
 } from "./world";
 
 type Cand = { tag: string; s: number; mk: () => Act | null };
@@ -31,7 +36,40 @@ function spot(p: Person, x: number, z: number, r = 1.4) {
   return { x: x + Math.cos(a) * r, z: z + Math.sin(a) * r };
 }
 
-const skill = (p: Person, k: string) => 1 + (p.skills[k] ?? 0) * 0.6;
+// 맡은 역할의 일은 더 능숙하게, 앓는 동안에는 힘에 부친다
+const ROLE_SKILL: Partial<Record<string, Role>> = {
+  farm: "farmer", fish: "fisher", hunt: "hunter", build: "builder", think: "scholar", craft: "crafter", heal: "healer", cook: "cook",
+};
+const ILL_WORK = [1, 0.9, 0.75, 0.55, 0.4, 0.3];
+const skill = (p: Person, k: string) =>
+  (1 + (p.skills[k] ?? 0) * 0.6) * (p.role && ROLE_SKILL[k] === p.role ? 1.25 : 1) * ILL_WORK[illOf(p)];
+
+/** 역할마다 더 먼저 하게 되는 일 */
+const ROLE_TAGS: Record<Role, string[]> = {
+  leader: ["council", "chat", "think"],
+  farmer: ["farm", "tame"],
+  fisher: ["fish"],
+  hunter: ["hunt", "catch"],
+  builder: ["build", "repair", "gather:wood", "gather:stone"],
+  scholar: ["think"],
+  crafter: ["craft"],
+  healer: ["nurse", "dig", "gather:herb", "craft:herbal", "craft:remedy", "craft:medicine"],
+  cook: ["cook", "tend", "makefire"],
+  sailor: ["fish", "board"],
+  guard: ["fight"],
+};
+const roleBoost = (p: Person, tag: string) =>
+  p.role && ROLE_TAGS[p.role].some((t) => tag === t || tag.startsWith(t + ":")) ? 0.22 : 0;
+
+/** 많이 아플 때 할 수 있는 일 */
+const SICK_OK = new Set(["eat", "drink", "sleep", "rest", "isolate", "medicate", "deposit", "shelter", "warm", "evacuate"]);
+
+/** 이 사람의 터에 있는 모닥불 (갈라져 나간 무리는 자기 불) */
+function fireFor(w: WorldState, ctx: Ctx, p: Person) {
+  const c = campOf(w, p);
+  if (c === w.camp) return ctx.campFire;
+  return nearest(w.structures, c.x, c.z, (s) => s.type === "campfire", 9);
+}
 function practice(p: Person, k: string) {
   p.skills[k] = Math.min(1, (p.skills[k] ?? 0) + 0.012);
 }
@@ -57,7 +95,17 @@ function abort(p: Person) {
 
 export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   const a0 = p.act;
-  if (a0 && a0.k !== "unconscious") {
+  const D = w.disaster;
+  if (a0 && D?.type === "tsunami" && a0.k !== "evacuate" && a0.k !== "unconscious" && p.seen.evac !== D.start && tsunamiThreat(w, p.traits.openness)) {
+    p.seen.evac = D.start;
+    abort(p);
+  }
+  const lv = illOf(p);
+  if (p.act && lv >= 3 && !SICK_OK.has(p.act.k) && p.act.k !== "unconscious" && p.seen.illAbort !== lv) {
+    p.seen.illAbort = lv;
+    abort(p);
+  }
+  if (a0 && p.act && a0.k !== "unconscious") {
     if (ctx.weather === "storm" && a0.k !== "shelter" && a0.k !== "sleep" && p.seen.storm !== w.weather.changedAt) {
       p.seen.storm = w.weather.changedAt;
       abort(p);
@@ -136,6 +184,8 @@ function speedOf(w: WorldState, p: Person, a: Act) {
   const yrs = age(w, p);
   if (yrs < 8) s *= 0.75;
   if (yrs > 65) s *= 0.75;
+  const lv = illOf(p);
+  if (lv) s *= [1, 0.95, 0.85, 0.7, 0.6, 0.5][lv];
   if (p.needs.energy < 20) s *= 0.8;
   if (p.emo.sadness > 0.5) s *= 0.85;
   if (p.emo.joy > 0.6) s *= 1.08;
@@ -163,16 +213,20 @@ function track(w: WorldState, p: Person, a: Act) {
       return false;
     }
   }
-  if (a.ph === 0 && (a.k === "follow" || a.k === "chat") && a.tid != null) {
+  if (a.ph === 0 && (a.k === "follow" || a.k === "chat" || a.k === "nurse" || a.k === "fight") && a.tid != null) {
     const q = findById(w.people, a.tid);
-    if (!q || !q.alive) {
+    if (!q || !onIsland(q)) {
       abort(p);
       return false;
     }
-    if (a.k === "follow") {
-      const s = spot(p, q.x, q.z, 1.2);
+    if (a.k === "follow" || a.k === "nurse" || a.k === "fight") {
+      const s = spot(p, q.x, q.z, a.k === "fight" ? 0.9 : 1.2);
       a.tx = s.x;
       a.tz = s.z;
+    }
+    if (a.k === "fight" && w.time - a.started > 0.8 * HOUR) {
+      abort(p);
+      return false;
     }
   }
   if (a.ph === 0 && a.k === "collect" && a.tid != null) {
@@ -211,6 +265,15 @@ function animFor(a: Act): Anim {
     case "leisure":
       return a.sub === "sing" ? "sing" : a.sub === "stars" ? "lie" : a.sub === "draw" ? "dig" : a.sub === "swim" ? "swim" : a.sub === "dance" ? "dance" : "sit";
     case "idle": return a.sub === "sit" ? "sit" : "idle";
+    case "rest": case "isolate": return "lie";
+    case "nurse": return "pick";
+    case "medicate": return "drink";
+    case "dig": return "dig";
+    case "council": return "talk";
+    case "repair": return "hammer";
+    case "fight": return "fight";
+    case "board": return "wave";
+    case "evacuate": return "cower";
     default: return "idle";
   }
 }
@@ -241,6 +304,13 @@ function start(w: WorldState, ctx: Ctx, p: Person, a: Act | null) {
       else if (a.sub === "sing") say(w, p, "happy", {}, "🎵");
       break;
     case "play": say(w, p, "play", {}, "🤸"); break;
+    case "rest": say(w, p, "fever", {}, "🤒"); break;
+    case "isolate": say(w, p, "isolate", {}, "🏕️", true); break;
+    case "nurse": say(w, p, "nurse", {}, "🩹"); break;
+    case "dig": say(w, p, "dig", {}, "⛏️"); break;
+    case "repair": say(w, p, "repair", {}, "🔨"); break;
+    case "fight": say(w, p, "fight", {}, "💢"); break;
+    case "evacuate": say(w, p, "tsunami", {}, "🌊", true); break;
     case "mourn": {
       const dead = findById(w.people, p.grief?.id);
       if (dead) say(w, p, "mourn", {}, "🕯️");
@@ -316,6 +386,34 @@ function arrive(w: WorldState, ctx: Ctx | null, p: Person, a: Act) {
       if (a.n != null) p.rot = a.n;
       break;
     }
+    case "repair": {
+      const st = findById(w.structures, a.tid);
+      if (!st || !st.dmg) return abort(p);
+      if (!st.fix) {
+        if (!payStock(w, repairCost(st))) return abort(p);
+        st.fix = 1;
+      }
+      p.rot = Math.atan2(st.z - p.z, st.x - p.x);
+      break;
+    }
+    case "nurse": {
+      const q = findById(w.people, a.tid);
+      if (!q || !illOf(q)) return abort(p);
+      p.rot = Math.atan2(q.z - p.z, q.x - p.x);
+      break;
+    }
+    case "fight": {
+      const q = findById(w.people, a.tid);
+      if (!q || !onIsland(q) || lying(q)) return abort(p);
+      p.rot = Math.atan2(q.z - p.z, q.x - p.x);
+      // 상대도 맞선다
+      if (q.act?.k !== "fight") {
+        q.act = act(w, "fight", q.x, q.z, a.t, { tid: p.id, ph: 1 });
+        q.rot = Math.atan2(p.z - q.z, p.x - q.x);
+        q.gesture = null;
+      }
+      break;
+    }
   }
   void ctx;
 }
@@ -369,6 +467,32 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
     case "mourn":
       if (p.grief) p.grief.until -= dt * 0.6;
       break;
+    case "rest": case "isolate":
+      n.energy = Math.min(100, n.energy + h * 9);
+      if ((a.k === "rest" && illOf(p) < 2 && n.energy > 70) || (a.k === "isolate" && illOf(p) < 5)) a.t = Math.min(a.t, 5 * MIN);
+      break;
+    case "council":
+      n.social = Math.min(100, n.social + h * 30);
+      break;
+    case "repair": {
+      const st = findById(w.structures, a.tid);
+      if (!st || !st.dmg) {
+        a.t = 0;
+        break;
+      }
+      st.dmg = Math.max(0, st.dmg - (dt / (Math.max(0.5, STRUCTS[st.type].work * 0.6) * HOUR)) * skill(p, "build") * buildMul(w));
+      if (st.dmg <= 0) {
+        st.dmg = 0;
+        st.fix = 0;
+        if (isHouse(st.type)) assignHomes(w);
+        feel(w, p, "joy", 0.3);
+        say(w, p, "repaired", {}, "🏠", true);
+        addFx(w, "complete", st.x, st.z, st.id);
+        bump(w);
+        a.t = 0;
+      }
+      break;
+    }
     case "shelter":
       if (ctx.weather !== "storm" && ctx.weather !== "snow" && a.t > 10 * MIN) a.t = Math.min(a.t, 10 * MIN);
       break;
@@ -500,7 +624,8 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
       let f = findById(w.structures, a.tid);
       if (!f) {
         if (stockOf(w, "stone") >= 3) addStock(w, "stone", -3);
-        f = makeStructure(w, "campfire", w.camp.x, w.camp.z, 0, true);
+        const c = campOf(w, p);
+        f = makeStructure(w, "campfire", c.x, c.z, 0, true);
         w.structures.push(f);
         bump(w);
       }
@@ -532,6 +657,7 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
         const d = quarrel ? -0.05 : 0.05 * compat * (0.5 + (p.traits.agreeableness + q.traits.agreeableness) / 2);
         p.rel[q.id] = clamp((p.rel[q.id] ?? 0) + d, -1, 1);
         q.rel[p.id] = clamp((q.rel[p.id] ?? 0) + d * 0.9, -1, 1);
+        socialize(w, p, q, !quarrel);
         if (quarrel) {
           feel(w, p, "anger", 0.2);
           feel(w, q, "sadness", 0.15);
@@ -582,8 +708,102 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
       addResearch(w, p, 8);
       break;
     }
+    case "medicate": {
+      const med = medForP(w, p);
+      if (med) giveMed(w, p, med, p);
+      break;
+    }
+    case "nurse": return finishNurse(w, p, a);
+    case "dig": return finishDig(w, ctx, p, a);
+    case "council": return finishCouncil(w, p);
+    case "fight": return finishFight(w, p, a);
   }
   if (p.act === a) abort(p);
+}
+
+// ─── 돌봄 · 약재 · 의논 · 다툼 ─────────────────────────────────────────
+
+function finishNurse(w: WorldState, p: Person, a: Act) {
+  const q = findById(w.people, a.tid);
+  if (!q || !onIsland(q) || !illOf(q)) return abort(p);
+  const lv = illOf(q);
+  const med = medForP(w, q);
+  q.seen.nursed = w.time;
+  q.needs.social = Math.min(100, q.needs.social + 25);
+  q.needs.fun = Math.min(100, q.needs.fun + 10);
+  q.needs.thirst = Math.max(q.needs.thirst, 80);
+  if (med) giveMed(w, q, med, p);
+  else {
+    feel(w, q, "love", 0.15, false);
+    say(w, q, "thanks", { name: p.name }, "🥹");
+  }
+  q.rel[p.id] = clamp((q.rel[p.id] ?? 0) + 0.06, -1, 1);
+  p.rel[q.id] = clamp((p.rel[q.id] ?? 0) + 0.03, -1, 1);
+  practice(p, "heal");
+  addResearch(w, p, 3, "herbs");
+  addResearch(w, p, 3, "remedy");
+  addResearch(w, p, 2, "medicine");
+  feel(w, p, "joy", 0.08, false);
+  // 돌보다가 옮기도 한다
+  if (lv >= 3 && chance(w, 0.03 * lv * (knows(w, "medicine") ? 0.4 : 1))) infect(w, p, "spread");
+  abort(p);
+}
+
+function finishDig(w: WorldState, ctx: Ctx, p: Person, a: Act) {
+  practice(p, "gather");
+  if (a.res === "mineral") {
+    addResearch(w, p, 3, "medicine");
+    const rock = discoverIngredient(w, p, "mineral", p.x, p.z);
+    if (!rock) say(w, p, "fail", {}, "🕳️");
+    return abort(p);
+  }
+  addResearch(w, p, 4, "remedy");
+  const b = ctx.T.biome(p.x, p.z);
+  if ((b === "forest" || b === "grass") && chance(w, 0.45)) {
+    discoverIngredient(w, p, "root", p.x, p.z);
+    return carryHome(w, ctx, p, a, "root", int(w, 1, 2));
+  }
+  say(w, p, "fail", {}, "🕳️");
+  abort(p);
+}
+
+function finishCouncil(w: WorldState, p: Person) {
+  const H = w.history;
+  p.seen.council = w.time;
+  const c = countermeasure(w, H.lastType);
+  if (c) addResearch(w, p, TECH_BY_ID[c].cost * 0.04, c);
+  else addResearch(w, p, 25);
+  for (const q of w.people) {
+    if (q === p || q.act?.k !== "council" || dist(p.x, p.z, q.x, q.z) > 6) continue;
+    p.rel[q.id] = clamp((p.rel[q.id] ?? 0) + 0.04, -1, 1);
+  }
+  if (w.timers.council !== H.lastDisaster) {
+    w.timers.council = H.lastDisaster;
+    const name = c ? TECH_BY_ID[c].name : "";
+    chron(w, "disaster", c
+      ? `사람들이 모여 다음 재해를 어떻게 막을지 머리를 맞댔다. '${name}'${josa(name, "을/를").slice(name.length)} 궁리하기 시작했다.`
+      : "사람들이 모여 부서진 것을 함께 고치고 서로를 다독이기로 했다.");
+  }
+  feel(w, p, "joy", 0.15, false);
+  p.emo.fear *= 0.5;
+  say(w, p, "council", {}, "🤝");
+  abort(p);
+}
+
+function finishFight(w: WorldState, p: Person, a: Act) {
+  const q = findById(w.people, a.tid);
+  if (!q || !onIsland(q)) return abort(p);
+  p.health = Math.max(1, p.health - range(w, 4, 11));
+  feel(w, p, "anger", 0.08, false);
+  feel(w, p, "fear", 0.1, false);
+  p.rel[q.id] = clamp((p.rel[q.id] ?? 0) - 0.05, -1, 1);
+  addFx(w, "clash", (p.x + q.x) / 2, (p.z + q.z) / 2, p.id);
+  easeWar(w, p, 0.015);
+  if (chance(w, 0.12) && !lying(q)) {
+    q.act = act(w, "unconscious", q.x, q.z, 40 * MIN, { ph: 1 });
+    q.anim = "lie";
+  }
+  abort(p);
 }
 
 function carryHome(w: WorldState, ctx: Ctx, p: Person, a: Act, res: Res, qty: number) {
@@ -641,7 +861,7 @@ function eat(w: WorldState, p: Person) {
 
 // ─── 채집 ──────────────────────────────────────────────────────────────
 
-const GATHER_RES: Res[] = ["stick", "wood", "stone", "fiber", "clay", "ore", "herb"];
+const GATHER_RES: Res[] = ["stick", "wood", "stone", "fiber", "clay", "ore", "herb", "mineral"];
 
 function gatherTarget(w: WorldState, p: Person, res: Res) {
   const R = 45;
@@ -680,6 +900,11 @@ function gatherTarget(w: WorldState, p: Person, res: Res) {
       const r = nearest(w.rocks, p.x, p.z, (q) => q.kind === "ore" && q.amt >= 1, 200);
       return r ? { rock: r } : null;
     }
+    case "mineral": {
+      if (!knows(w, "medicine")) return null;
+      const r = nearest(w.rocks, p.x, p.z, (q) => q.kind === "mineral" && q.amt >= 1, 200);
+      return r ? { rock: r } : null;
+    }
   }
   return null;
 }
@@ -698,7 +923,7 @@ function planGather(w: WorldState, p: Person, res: Res): Act | null {
   if (res === "stone") t = 12 * MIN;
   if (res === "fiber" || res === "herb") t = 8 * MIN;
   if (res === "clay") t = 15 * MIN;
-  if (res === "ore") t = 24 * MIN;
+  if (res === "ore" || res === "mineral") t = 24 * MIN;
   t /= toolMul(w) * skill(p, "gather");
   return act(w, "gather", e.x + Math.cos(ang) * off, e.z + Math.sin(ang) * off, t, { tid: e.id, res });
 }
@@ -734,7 +959,11 @@ function finishGather(w: WorldState, ctx: Ctx, p: Person, a: Act) {
       addResearch(w, p, 4, "cordage");
       addResearch(w, p, 2, "basket");
       addResearch(w, p, 2, "weaving");
-    } else addResearch(w, p, 5, "medicine");
+    } else {
+      addResearch(w, p, 5, "herbs");
+      addResearch(w, p, 3, "remedy");
+      addResearch(w, p, 3, "medicine");
+    }
   } else if (rk && rk.amt >= 1) {
     const y = res === "stone" ? int(w, 2, 3) : res === "clay" ? 3 : 2;
     qty = Math.min(cap, y, Math.floor(rk.amt));
@@ -747,7 +976,9 @@ function finishGather(w: WorldState, ctx: Ctx, p: Person, a: Act) {
     else if (res === "ore") {
       addResearch(w, p, 4, "metallurgy");
       addResearch(w, p, 2, "iron");
-    }
+    } else if (res === "mineral") addResearch(w, p, 4, "medicine");
+    // 돌을 캐다가 숨은 광맥을 알아보기도 한다
+    if ((res === "stone" || res === "ore") && knows(w, "herbs") && w.deposits.length) discoverIngredient(w, p, "mineral", rk.x, rk.z);
   }
   practice(p, "gather");
   if (qty > 0) return carryHome(w, ctx, p, a, res, qty);
@@ -762,6 +993,7 @@ function hasBuilt(w: WorldState, type: Structure["type"]) {
 
 export function wantedRecipes(w: WorldState, ctx: Ctx): Recipe[] {
   const adults = Math.max(1, ctx.adults);
+  const sick = sickCount(w, ctx);
   const want: Partial<Record<string, number>> = {
     handaxe: 1 + Math.floor(adults / 3),
     spear: Math.max(1, Math.floor(adults / 2)),
@@ -773,6 +1005,10 @@ export function wantedRecipes(w: WorldState, ctx: Ctx): Recipe[] {
     hoe: w.structures.some((s) => s.type === "farm") ? 1 + Math.floor(adults / 3) : 0,
     pot: 2 + Math.floor(ctx.pop / 3),
     metal: (ctx.need.metal ?? 0) + 3,
+    net: 1 + Math.floor(adults / 4),
+    herbal: 1 + sick,
+    remedy: 2 + Math.floor(ctx.pop / 6) + sick,
+    medicine: 2 + Math.floor(ctx.pop / 8),
   };
   const out: Recipe[] = [];
   for (const r of RECIPES) {
@@ -793,6 +1029,7 @@ export function wantedRecipes(w: WorldState, ctx: Ctx): Recipe[] {
 }
 
 const recipesFor = (w: WorldState, ctx: Ctx) => (ctx.memo.recipes ??= wantedRecipes(w, ctx)) as Recipe[];
+const sickCount = (w: WorldState, ctx: Ctx) => (ctx.memo.sick ??= w.people.filter((q) => onIsland(q) && illOf(q) >= 1).length) as number;
 
 function finishCraft(w: WorldState, p: Person, a: Act) {
   const r = RECIPES.find((x) => x.id === a.sub);
@@ -927,41 +1164,73 @@ function settleTame(w: WorldState, p: Person, a: Act) {
   addResearch(w, p, 3, "husbandry");
 }
 
+/** 배를 타고 먼바다로: 깊은 곳의 큰 물고기를 노린다 */
+function boatSpot(w: WorldState, ctx: Ctx, dock: Structure) {
+  const T = ctx.T;
+  const reach = knows(w, "navigation") ? 40 : 26;
+  const f = nearest(w.fish, dock.x, dock.z, (x) => x.st === "swim" && (FISH_INFO[x.kind].boat || x.kind === "bigfish") && T.height(x.x, x.z) < -2.2, reach);
+  if (f) return { x: f.x, z: f.z };
+  for (let k = 0; k < 12; k++) {
+    const a = dock.rot + range(w, -0.9, 0.9);
+    const d = range(w, 8, reach);
+    const x = dock.x + Math.cos(a) * d, z = dock.z + Math.sin(a) * d;
+    const h = T.height(x, z);
+    if (h < -2.5 && h > -7.8) return { x, z };
+  }
+  return null;
+}
+
 function fishSpot(w: WorldState, ctx: Ctx, p: Person) {
-  const dock = w.structures.find((s) => s.type === "dock" && s.prog >= 1);
+  const dock = w.structures.find((s) => s.type === "dock" && s.prog >= 1 && (s.dmg ?? 0) < 0.6);
+  if (dock && knows(w, "boat") && chance(w, p.role === "fisher" || p.role === "sailor" ? 0.6 : 0.35)) {
+    const b = boatSpot(w, ctx, dock);
+    if (b) return { x: b.x, z: b.z, rot: Math.atan2(b.z - dock.z, b.x - dock.x), dock: false, boat: true };
+  }
   if (dock && chance(w, 0.6)) return { x: dock.x, z: dock.z, rot: dock.rot, dock: true };
   const f = nearest(w.fish, p.x, p.z, (x) => x.st !== "held", 60);
   const ang = f ? Math.atan2(f.z, f.x) : Math.atan2(p.z, p.x) + range(w, -0.4, 0.4);
   const sp = ctx.T.shorePoint(ang, 0.3);
-  return { x: sp.x, z: sp.z, rot: ang, dock: false };
+  return { x: sp.x, z: sp.z, rot: ang, dock: false, boat: false };
 }
 
 function planFish(w: WorldState, ctx: Ctx, p: Person): Act | null {
   const s = fishSpot(w, ctx, p);
   const rod = stockOf(w, "rod") >= 1, spear = stockOf(w, "spear") >= 1;
+  if (s.boat) return act(w, "fish", s.x, s.z, range(w, 45, 75) * MIN, { n: s.rot, sub: "boat", run: 0 });
   return act(w, "fish", s.x, s.z, range(w, 25, 45) * MIN, {
     n: s.rot, sub: rod ? "rod" : spear ? "spear" : "hand", run: 0, res: s.dock ? "fish" : undefined,
   });
 }
 
 function finishFish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
-  const base = a.sub === "rod" ? 0.75 : a.sub === "spear" ? 0.55 : 0.35;
+  const boat = a.sub === "boat";
+  const base = boat ? 0.8 : a.sub === "rod" ? 0.75 : a.sub === "spear" ? 0.55 : 0.35;
   const dock = a.res === "fish";
+  const net = stockOf(w, "net") >= 1;
   let qty = 0;
-  if (chance(w, Math.min(0.95, base * (0.85 + skill(p, "fish") * 0.15) * (dock ? 1.3 : 1)))) {
-    const f = nearest(w.fish, p.x, p.z, (x) => x.st !== "held", 9);
+  if (chance(w, Math.min(0.95, base * (0.85 + skill(p, "fish") * 0.15) * (dock ? 1.3 : 1) * (net ? 1.15 : 1)))) {
+    // 배가 없으면 먼바다 물고기는 잡을 수 없다
+    const f = nearest(w.fish, p.x, p.z, (x) => x.st !== "held" && (boat || !FISH_INFO[x.kind].boat), boat ? 14 : 9);
     if (f) {
-      qty = f.kind === "bigfish" ? 3 : 1;
+      qty = FISH_INFO[f.kind]?.qty ?? 1;
       removeById(w.fish, f.id);
       addFx(w, "splash", f.x, f.z, f.id);
       bump(w);
     } else qty = 1;
     if (dock) qty += 1;
+    if (net) qty += 1;
+    if (boat && knows(w, "navigation")) qty += 1;
   }
   if (a.sub === "rod") wearTool(w, p, "rod");
+  if (net) wearTool(w, p, "net");
   practice(p, "fish");
   addResearch(w, p, 4, "fishing");
   addResearch(w, p, 3, "boat");
+  addResearch(w, p, 3, "net");
+  if (boat) {
+    addResearch(w, p, 3, "navigation");
+    addResearch(w, p, 2, "shipbuilding");
+  }
   if (qty > 0) {
     feel(w, p, "joy", 0.2);
     return carryHome(w, ctx, p, a, "fish", qty);
@@ -1070,7 +1339,8 @@ function materialWants(w: WorldState, ctx: Ctx): Stock {
   if (knows(w, "cordage")) want.fiber = 6;
   if (knows(w, "pottery")) want.clay = 6;
   if (knows(w, "metallurgy")) want.ore = 6;
-  if (knows(w, "medicine")) want.herb = 4;
+  if (knows(w, "herbs")) want.herb = 4 + sickCount(w, ctx) * 2;
+  if (knows(w, "medicine")) want.mineral = 3;
   for (const [r, n] of Object.entries(ctx.need) as [Res, number][]) want[r] = (want[r] ?? 0) + n;
   for (const rc of recipesFor(w, ctx)) {
     for (const [r, n] of Object.entries(rc.cost) as [Res, number][]) want[r] = Math.max(want[r] ?? 0, n + (r === "stone" ? 2 : 0));
@@ -1086,8 +1356,9 @@ function sleepSpot(w: WorldState, ctx: Ctx, p: Person) {
     const r = STRUCTS[home.type].radius * 0.4;
     return { x: home.x + Math.cos(a) * r, z: home.z + Math.sin(a) * r };
   }
-  const f = ctx.campFire;
-  return spot(p, f?.x ?? w.camp.x, f?.z ?? w.camp.z, 2);
+  const f = fireFor(w, ctx, p);
+  const c = campOf(w, p);
+  return spot(p, f?.x ?? c.x, f?.z ?? c.z, 2);
 }
 
 function drinkPlan(w: WorldState, ctx: Ctx, p: Person): Act {
@@ -1115,11 +1386,13 @@ function partnerFor(w: WorldState, p: Person): Person | null {
   let best: Person | null = null;
   let bs = -Infinity;
   for (const q of w.people) {
-    if (q === p || !q.alive || lying(q) || age(w, q) < 3) continue;
+    if (q === p || !onIsland(q) || lying(q) || age(w, q) < 3) continue;
+    if (illOf(q) >= 3 || enemies(w, p, q)) continue;
+    const kin = p.group != null && q.group === p.group ? 0.3 : 0;
     const d = dist(p.x, p.z, q.x, q.z);
     if (d > 45) continue;
     if (q.act && !SOFT.includes(q.act.k) && q.act.k !== "idle") continue;
-    const s = (p.rel[q.id] ?? 0) * 2 - d * 0.03 + (q.id === p.partner ? 0.5 : 0);
+    const s = (p.rel[q.id] ?? 0) * 2 - d * 0.03 + (q.id === p.partner ? 0.5 : 0) + kin;
     if (s > bs) {
       bs = s;
       best = q;
@@ -1157,7 +1430,8 @@ function leisurePlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const s = spot(p, bench.x, bench.z, 0.4);
     return act(w, "leisure", s.x, s.z, t, { sub: "sing", n: bench.rot });
   }
-  const s = spot(p, w.camp.x, w.camp.z, range(w, 3, 7));
+  const c = campOf(w, p);
+  const s = spot(p, c.x, c.z, range(w, 3, 7));
   return act(w, "leisure", s.x, s.z, t, { sub });
 }
 
@@ -1168,13 +1442,14 @@ function thinkPlan(w: WorldState, ctx: Ctx, p: Person): Act {
     const s = spot(p, lib.x, lib.z, STRUCTS[lib.type].radius + 0.6);
     return act(w, "think", s.x, s.z, t, { sub: "study" });
   }
+  const camp = campOf(w, p);
   if (ctx.night && ctx.weather === "clear") {
-    const s = spot(p, w.camp.x, w.camp.z, 5);
+    const s = spot(p, camp.x, camp.z, 5);
     return act(w, "think", s.x, s.z, t, { sub: "stars" });
   }
   const ws = w.structures.find((s) => s.type === "workshop" && s.prog >= 1);
-  const f = ctx.campFire;
-  const c = ws ?? f ?? w.camp;
+  const f = fireFor(w, ctx, p);
+  const c = (camp === w.camp ? ws : null) ?? f ?? camp;
   const s = spot(p, c.x, c.z, 1.8);
   return act(w, "think", s.x, s.z, t);
 }
@@ -1212,9 +1487,57 @@ function foragePlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
   return act(w, "forage", sp.x, sp.z, range(w, 15, 25) * MIN, { sub: "shell" });
 }
 
+/** 쓰나미를 피해 가장 가까운 높은 곳으로 */
+function evacPlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
+  const T = ctx.T;
+  const safe = floodPeak(w) + 2.5;
+  for (let r = 4; r <= 48; r += 4) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2 + r * 0.37;
+      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      if (T.isLand(x, z) && T.height(x, z) > safe) return act(w, "evacuate", x, z, 50 * MIN, { run: 1 });
+    }
+  }
+  return null;
+}
+
+/** 아프면 집(또는 요양소)에서 앓아눕는다. 아주 위중하면 떨어져서 요양한다 */
+function restPlan(w: WorldState, ctx: Ctx, p: Person, apart: boolean): Act | null {
+  const inf = infirmary(w);
+  if (apart || (!homeOf(w, p) && inf)) {
+    if (inf) {
+      const s = spot(p, inf.x, inf.z, STRUCTS.infirmary.radius * 0.45);
+      return act(w, apart ? "isolate" : "rest", s.x, s.z, (apart ? 6 : 3) * HOUR);
+    }
+    // 요양소가 없으면 마을에서 떨어진 나무 그늘로
+    const c = campOf(w, p);
+    const tree = nearest(w.plants, c.x + 18, c.z, (q) => isTree(q.kind) && q.g >= 1 && !q.stump && dist(q.x, q.z, c.x, c.z) > 16 && dist(q.x, q.z, c.x, c.z) < 30, 40);
+    const x = tree ? tree.x + 0.8 : c.x + 18, z = tree ? tree.z : c.z;
+    if (ctx.T.isLand(x, z)) return act(w, "isolate", x, z, 6 * HOUR);
+  }
+  const sp = sleepSpot(w, ctx, p);
+  return act(w, "rest", sp.x, sp.z, 3 * HOUR);
+}
+
+function digPlan(w: WorldState, ctx: Ctx, p: Person, what: "root" | "mineral"): Act | null {
+  const T = ctx.T;
+  const c = campOf(w, p);
+  const pt = T.randomPoint(w, (x, z, b) => {
+    const d = dist(x, z, c.x, c.z);
+    if (what === "root") return (b === "forest" || b === "grass") && d > 8 && d < 40;
+    return (b === "rock" || b === "forest" || (b === "grass" && T.height(x, z) > 4)) && T.slopeAt(x, z) < 0.8 && d < 75;
+  }, 60);
+  return pt ? act(w, "dig", pt.x, pt.z, 25 * MIN, { res: what }) : null;
+}
+
 function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   const yrs = age(w, p);
   const T = ctx.T;
+  const threat = !!w.disaster && tsunamiThreat(w, p.traits.openness) && T.height(p.x, p.z) < floodPeak(w) + 1.5;
+  if (threat) {
+    const e = evacPlan(w, ctx, p);
+    if (e) return e;
+  }
   if (yrs < 3) {
     const carer = p.parents.map((id) => findById(w.people, id)).find((q) => q?.alive) ?? living(w).find((q) => isAdult(w, q));
     if (carer && carer.act?.k === "sleep") {
@@ -1231,8 +1554,22 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   const { conscientiousness: C, openness: O, extraversion: E, agreeableness: A } = p.traits;
   const cands: Cand[] = [];
   const add = (tag: string, s: number, mk: () => Act | null) => {
-    if (s > 0.01) cands.push({ tag, s: s + rand(w) * 0.07, mk });
+    if (s > 0.01) cands.push({ tag, s: s + rand(w) * 0.07 + roleBoost(p, tag), mk });
   };
+  const lv = illOf(p);
+  const camp = campOf(w, p);
+
+  // 아플 때
+  if (lv >= 5 && !isolated(w, p)) add("isolate", 1.3, () => restPlan(w, ctx, p, true));
+  else if (lv >= 3) add("rest", lv >= 4 ? 1.1 : 0.85, () => restPlan(w, ctx, p, lv >= 5));
+  else if (lv === 2 && n.energy < 55) add("rest", 0.5, () => restPlan(w, ctx, p, false));
+  if (lv >= 2 && lv <= 3 && w.time - (p.seen.medAt ?? -1e9) > 4 * HOUR) {
+    const med = medForP(w, p);
+    if (med) add("medicate", 0.8 + lv * 0.05, () => {
+      const st = spot(p, ctx.storage.x, ctx.storage.z, 1.1);
+      return act(w, "medicate", st.x, st.z, 4 * MIN);
+    });
+  }
 
   if (p.carry) {
     const st = ctx.storage;
@@ -1300,7 +1637,7 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   }
 
   // 불
-  const cf = ctx.campFire;
+  const cf = fireFor(w, ctx, p);
   if (knows(w, "fire") && !kid) {
     const raw = stockOf(w, "meat") + stockOf(w, "fish");
     const wantsFire = ctx.evening || ctx.night || ctx.temp < 14 || n.warmth < 50 || (knows(w, "cooking") && raw >= 2);
@@ -1313,7 +1650,7 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     }
     if ((!cf || !cf.lit) && wantsFire && ctx.weather !== "storm" && stockOf(w, "stick") >= 2) {
       add("makefire", 0.5 + (ctx.evening ? 0.12 : 0) + (n.warmth < 45 ? 0.2 : 0), () => {
-        const s = spot(p, w.camp.x, w.camp.z, 1);
+        const s = spot(p, camp.x, camp.z, 1);
         return act(w, "makefire", s.x, s.z, 20 * MIN, { tid: cf?.id });
       });
     }
@@ -1368,6 +1705,85 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     }
   }
 
+  // 부서진 것 고치기
+  if (!kid) {
+    const broken = (ctx.memo.broken ??= damaged(w).filter((x) => x.fix || hasStock(w, repairCost(x)))) as Structure[];
+    const st = nearest(broken, p.x, p.z);
+    if (st) {
+      add("repair", 0.36 + 0.25 * C + (isHouse(st.type) ? 0.12 : 0) + ((st.dmg ?? 0) >= 0.6 ? 0.1 : 0), () => {
+        const ang = Math.atan2(p.z - st.z, p.x - st.x);
+        const r = STRUCTS[st.type].radius + 0.5;
+        return act(w, "repair", st.x + Math.cos(ang) * r, st.z + Math.sin(ang) * r, 1 * HOUR, { tid: st.id });
+      });
+    }
+  }
+
+  // 재해가 지나간 뒤에는 모여서 의논한다
+  const H = w.history;
+  if (!kid && H.lastDisaster && !w.disaster && w.time - H.lastDisaster < 1.2 * DAY && (p.seen.council ?? 0) < H.lastDisaster) {
+    add("council", 0.7, () => {
+      const f = fireFor(w, ctx, p) ?? camp;
+      const s = spot(p, f.x, f.z, 2.4);
+      return act(w, "council", s.x, s.z, 45 * MIN);
+    });
+  }
+
+  // 아픈 사람 돌보기
+  if (!kid && lv <= 1) {
+    const nursing = (ctx.memo.nursing ??= new Set(w.people.filter((q) => q.act?.k === "nurse").map((q) => q.act!.tid))) as Set<number | undefined>;
+    let best: Person | null = null, bs = 0;
+    for (const q of w.people) {
+      if (q === p || !onIsland(q) || illOf(q) < 2 || nursing.has(q.id)) continue;
+      if (w.time - (q.seen.nursed ?? -1e9) < 5 * HOUR) continue;
+      const family = q.partner === p.id || q.parents.includes(p.id) || p.parents.includes(q.id);
+      const med = medForP(w, q);
+      if (illOf(q) >= 5 && isolated(w, q) && !family && p.role !== "healer" && !med) continue;
+      const sc = 0.3 + A * 0.25 + (family ? 0.25 : 0) + illOf(q) * 0.06 + (med ? 0.15 : 0) - dist(p.x, p.z, q.x, q.z) * 0.004;
+      if (sc > bs) {
+        bs = sc;
+        best = q;
+      }
+    }
+    if (best) {
+      const q = best;
+      add("nurse", bs, () => {
+        nursing.add(q.id);
+        return act(w, "nurse", q.x, q.z, 20 * MIN, { tid: q.id });
+      });
+    }
+  }
+
+  // 약재 찾기: 뿌리는 숲의 땅속에, 약돌은 산자락 어딘가에
+  if (!kid && knows(w, "herbs")) {
+    const needRoot = !w.found.includes("root") || (knows(w, "remedy") && stockOf(w, "root") < 3);
+    const needMineral = knows(w, "remedy") && !w.found.includes("mineral") && w.deposits.length > 0;
+    if (needRoot || needMineral) {
+      const blocked = (ctx.memo.blocked ??= blockedByFound(w).length > 0) as boolean;
+      add("dig", 0.16 + O * 0.1 + (sickCount(w, ctx) ? 0.2 : 0) + (blocked ? 0.22 : 0), () =>
+        digPlan(w, ctx, p, needMineral && (!needRoot || chance(w, 0.5)) ? "mineral" : "root"));
+    }
+  }
+
+  // 무리끼리 싸움이 붙었을 때
+  const wg = warOf(w, p);
+  if (wg && !kid && !teen && !elder && lv < 2) {
+    const fights = (ctx.memo.fights ??= w.people.filter((q) => q.act?.k === "fight").length) as number;
+    if (fights < Math.max(2, ctx.adults / 4)) {
+      const foe = nearest(w.people, p.x, p.z, (q) => onIsland(q) && enemies(w, p, q) && !lying(q) && isAdult(w, q), 45);
+      if (foe) add("fight", 0.26 + p.emo.anger * 0.5 + (1 - A) * 0.25, () => act(w, "fight", foe.x, foe.z, 8 * MIN, { tid: foe.id, run: 1 }));
+    }
+  }
+
+  // 섬 밖으로 떠날 채비
+  const trip = voyageOf(w, p);
+  if (trip && !trip.left) {
+    add("board", 1.4, () => {
+      const bp = boardPoint(w, trip);
+      const s = spot(p, bp.x, bp.z, 1.2);
+      return act(w, "board", s.x, s.z, 3 * HOUR);
+    });
+  }
+
   // 농사 / 목축
   if (!kid && knows(w, "agriculture")) {
     const fw = (ctx.memo.farm ??= farmWork(w)) as ReturnType<typeof farmWork>;
@@ -1404,7 +1820,7 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
 
   if (kid) {
     add("play", 0.32 + urg(n.fun, 85) * 0.4, () => {
-      const s = spot(p, w.camp.x + range(w, -8, 8), w.camp.z + range(w, -8, 8), 1);
+      const s = spot(p, camp.x + range(w, -8, 8), camp.z + range(w, -8, 8), 1);
       if (!T.isLand(s.x, s.z)) return null;
       return act(w, "play", s.x, s.z, range(w, 10, 25) * MIN, { run: 1 });
     });
@@ -1423,11 +1839,14 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     return pt ? act(w, "wander", pt.x, pt.z, range(w, 5, 15) * MIN) : null;
   });
 
-  cands.sort((a, b) => b.s - a.s);
-  for (const c of cands) {
+  // 많이 아프면 쉬고 먹는 것 말고는 하지 않는다
+  const list = lv >= 3 ? cands.filter((c) => SICK_OK.has(c.tag)) : cands;
+  list.sort((a, b) => b.s - a.s);
+  for (const c of list) {
     const a = c.mk();
     if (a) return a;
   }
+  if (lv >= 3) return restPlan(w, ctx, p, lv >= 5);
   return act(w, "idle", p.x, p.z, range(w, 10, 20) * MIN, { ph: 1, sub: chance(w, 0.5) ? "sit" : undefined });
 }
 
@@ -1439,6 +1858,9 @@ export const ACT_LABEL: Record<ActKind, string> = {
   farm: "밭일하는 중", shelter: "비바람을 피하는 중", warm: "불을 쬐는 중", mourn: "애도하는 중",
   care: "아이를 돌보는 중", collect: "줍는 중", react: "", unconscious: "정신을 잃은 상태",
   explore: "섬을 둘러보는 중", tame: "짐승을 길들이는 중", play: "노는 중", follow: "따라가는 중",
+  rest: "앓아누워 쉬는 중", isolate: "떨어져서 요양하는 중", nurse: "아픈 사람을 돌보는 중", medicate: "약을 먹는 중",
+  dig: "땅을 파며 약재를 찾는 중", council: "모여서 의논하는 중", repair: "부서진 곳을 고치는 중",
+  evacuate: "높은 곳으로 피하는 중", fight: "다투는 중", board: "떠날 채비를 하는 중",
 };
 
 export function actLabel(a: Act | null) {
@@ -1452,5 +1874,7 @@ export function actLabel(a: Act | null) {
   if (a.k === "think" && a.sub === "study") return "기록을 읽으며 연구하는 중";
   if (a.k === "think" && a.sub === "stars") return "별을 관찰하는 중";
   if (a.k === "farm") return a.sub === "harvest" ? "수확하는 중" : "씨앗을 심는 중";
+  if (a.k === "fish" && a.sub === "boat") return "배를 타고 고기를 잡는 중";
+  if (a.k === "dig" && a.res === "mineral") return "땅을 파며 광맥을 찾는 중";
   return ACT_LABEL[a.k];
 }

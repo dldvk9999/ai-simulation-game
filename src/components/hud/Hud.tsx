@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useHud } from "@/game/hud";
+import { useHud, type GroupSummary, type PersonSummary } from "@/game/hud";
 import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
-import { MAX_VIEWERS } from "@/sim/constants";
+import { GROUP_POP, MAX_VIEWERS } from "@/sim/constants";
 import { ERAS, TECHS } from "@/sim/data";
 import { WEATHER_ICON, WEATHER_NAME } from "@/sim/weather";
 
@@ -89,6 +89,13 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
         <div className="chips">
           <span className="chip era">{s.era}</span>
           <span className="chip">👥 {s.pop}명</span>
+          {s.abroad > 0 && <span className="chip">⛵ {s.abroad}명 섬 밖</span>}
+          {s.disaster && (
+            <span className="chip alert">
+              {s.disaster.icon} {s.disaster.name}{s.disaster.coming ? " 다가옴" : ""}
+            </span>
+          )}
+          {s.war && <span className="chip alert">⚔️ 무리끼리 다툼</span>}
           <span className="chip" title={s.isHost ? "이 화면이 섬의 시간을 돌리고 있어요" : "다른 관찰자와 함께 보는 중"}>
             👁 {s.viewers}/{MAX_VIEWERS}
           </span>
@@ -144,29 +151,86 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
   );
 }
 
+/** 사람 한 줄: 누르면 그 사람을 보고 따라간다 (섬 밖에 있으면 보기만) */
+function PersonRow({ p }: { p: PersonSummary }) {
+  const selected = useHud((s) => s.selectedId === p.id);
+  const following = useHud((s) => s.followId === p.id);
+  return (
+    <button
+      className={`person-row ${selected ? "sel" : ""} ${p.away ? "away" : ""}`}
+      onClick={() => useHud.setState({ selectedId: p.id, followId: p.away ? null : p.id })}
+      title={p.away ? p.name : `${p.name} 따라가기`}
+    >
+      <span className="emoji">{p.emoji}</span>
+      <span className="pname">
+        {p.role && <span className="role">{p.role}</span>}
+        {p.name}
+      </span>
+      <span className="age">{p.age}세</span>
+      {following && <span className="follow">●</span>}
+      <span className="pact">{p.action}</span>
+    </button>
+  );
+}
+
+const groupColor = (hue: number) => `hsl(${Math.round(hue * 360)} 62% 55%)`;
+
+type GroupRow = Pick<GroupSummary, "id" | "title" | "stage" | "count" | "war" | "apart" | "leader"> & { hue: number | null; people: PersonSummary[] };
+
+/** 무리 단위로 묶는다: 조직·문명, 무소속, 섬 밖에 나간 사람 */
+function useGroupRows(): GroupRow[] | null {
+  const people = useHud((s) => s.people);
+  const groups = useHud((s) => s.groups);
+  const pop = useHud((s) => s.pop + s.abroad);
+  if (!groups.length || pop < GROUP_POP) return null;
+  const alive = people.filter((p) => p.alive);
+  const rows: GroupRow[] = groups.map((g) => ({ ...g, people: alive.filter((p) => p.group === g.id && !p.away) }));
+  const known = new Set(groups.map((g) => g.id));
+  const loners = alive.filter((p) => (p.group == null || !known.has(p.group)) && !p.away);
+  if (loners.length) rows.push({ id: -1, title: "무소속", stage: "어느 무리에도 속하지 않음", count: loners.length, war: null, apart: false, leader: "", hue: null, people: loners });
+  const away = alive.filter((p) => p.away);
+  if (away.length) rows.push({ id: -2, title: "섬 밖에 나간 사람들", stage: "항해·여행 중", count: away.length, war: null, apart: false, leader: "", hue: null, people: away });
+  return rows;
+}
+
+function GroupHeader({ g, open }: { g: GroupRow; open: boolean }) {
+  return (
+    <button
+      className={`group-row ${open ? "open" : ""}`}
+      onClick={() => useHud.setState({ openGroup: open ? null : g.id })}
+      aria-expanded={open}
+    >
+      <span className="flag" style={{ background: g.hue == null ? "#c9bba0" : groupColor(g.hue) }}>{g.id === -2 ? "⛵" : ""}</span>
+      <span className="gname">{g.title}</span>
+      <span className="gcount">{g.people.length}명</span>
+      <span className="chev">{open ? "▾" : "▸"}</span>
+      <span className="gstage">
+        {g.stage}
+        {g.leader && ` · 👑 ${g.leader}`}
+        {g.apart && " · 따로 터를 잡음"}
+        {g.war && <b className="gwar"> · ⚔️ {g.war}와(과) 다툼</b>}
+      </span>
+    </button>
+  );
+}
+
 function PeopleList() {
   const people = useHud((s) => s.people);
-  const selectedId = useHud((s) => s.selectedId);
-  const followId = useHud((s) => s.followId);
   const hasCard = useHud((s) => s.selected != null);
+  const openGroup = useHud((s) => s.openGroup);
+  const rows = useGroupRows();
   const alive = people.filter((p) => p.alive);
   if (!alive.length) return null;
   return (
     <div className={`card people ${hasCard ? "compact" : ""}`}>
-      {alive.map((p) => (
-        <button
-          key={p.id}
-          className={`person-row ${selectedId === p.id ? "sel" : ""}`}
-          onClick={() => useHud.setState({ selectedId: p.id, followId: p.id })}
-          title={`${p.name} 따라가기`}
-        >
-          <span className="emoji">{p.emoji}</span>
-          <span className="pname">{p.name}</span>
-          <span className="age">{p.age}세</span>
-          {followId === p.id && <span className="follow">●</span>}
-          <span className="pact">{p.action}</span>
-        </button>
-      ))}
+      {rows
+        ? rows.map((g) => (
+            <div key={g.id} className="group">
+              <GroupHeader g={g} open={openGroup === g.id} />
+              {openGroup === g.id && g.people.map((p) => <PersonRow key={p.id} p={p} />)}
+            </div>
+          ))
+        : alive.map((p) => <PersonRow key={p.id} p={p} />)}
     </div>
   );
 }
@@ -198,6 +262,7 @@ function PersonCard() {
             {p.alive ? `${p.mainEmotion} · ${p.action}` : "영원히 잠들었어요"}
             {p.preg && " · 🤰"}
           </div>
+          {p.illName && <div className={`ill lv${p.ill}`}>🤒 {p.illName} ({p.ill}단계)</div>}
         </div>
         <button className="x" onClick={() => useHud.setState({ selectedId: null, followId: null })}>✕</button>
       </div>
@@ -224,15 +289,19 @@ function PersonCard() {
         </>
       )}
       <div className="meta">
+        {p.groupName && <div>🏳️ {p.groupName}{p.role && ` · ${p.role}`}</div>}
         {p.traits.length > 0 && <div>🧭 {p.traits.join(" · ")}</div>}
+        <div>💭 뜻: {p.view}</div>
         <div>💗 {p.likes}</div>
         <div>🏠 {p.home}{p.carry && ` · 🎒 ${p.carry}`}</div>
         {p.family.length > 0 && <div>👪 {p.family.join(" · ")}</div>}
         {p.skills.length > 0 && <div>🛠 {p.skills.join(" · ")}</div>}
       </div>
-      <button className="follow-btn" onClick={() => useHud.setState({ followId: followId === p.id ? null : p.id })}>
-        {followId === p.id ? "따라가기 멈추기" : "따라가기"}
-      </button>
+      {!p.away && (
+        <button className="follow-btn" onClick={() => useHud.setState({ followId: followId === p.id ? null : p.id })}>
+          {followId === p.id ? "따라가기 멈추기" : "따라가기"}
+        </button>
+      )}
     </div>
   );
 }
@@ -250,20 +319,47 @@ function Drawer() {
   );
 }
 
+function PersonItem({ p }: { p: PersonSummary }) {
+  return (
+    <li onClick={() => p.alive && useHud.setState({ selectedId: p.id, followId: p.away ? null : p.id })} className={p.alive ? "" : "gone"}>
+      {p.emoji} {p.role && <span className="role">{p.role}</span>}<b>{p.name}</b> {p.age}세 · {p.action}
+    </li>
+  );
+}
+
 function PeopleDrawer() {
   const people = useHud((s) => s.people);
   const stock = useHud((s) => s.stock);
+  const openGroup = useHud((s) => s.openGroup);
+  const rows = useGroupRows();
+  const gone = people.filter((p) => !p.alive);
   return (
     <div className="card drawer">
       <button className="x" onClick={() => useHud.setState({ panel: "none" })}>✕</button>
       <h3>섬 사람들</h3>
-      <ul className="plist">
-        {people.map((p) => (
-          <li key={p.id} onClick={() => p.alive && useHud.setState({ selectedId: p.id, followId: p.id })} className={p.alive ? "" : "gone"}>
-            {p.emoji} <b>{p.name}</b> {p.age}세 · {p.action}
-          </li>
-        ))}
-      </ul>
+      {rows ? (
+        <div className="glist">
+          {rows.map((g) => (
+            <div key={g.id} className="group">
+              <GroupHeader g={g} open={openGroup === g.id} />
+              {openGroup === g.id && (
+                <ul className="plist inner">
+                  {g.people.map((p) => <PersonItem key={p.id} p={p} />)}
+                </ul>
+              )}
+            </div>
+          ))}
+          {gone.length > 0 && (
+            <ul className="plist">
+              {gone.map((p) => <PersonItem key={p.id} p={p} />)}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <ul className="plist">
+          {people.map((p) => <PersonItem key={p.id} p={p} />)}
+        </ul>
+      )}
       <h3>창고</h3>
       <div className="stock">
         {stock.length === 0 && <span className="sub">아직 모아둔 것이 없어요</span>}
@@ -345,6 +441,10 @@ function Help() {
         <li>👤 사람은 건드릴 수 없어요. 클릭하면 마음과 상태를 볼 수 있고, 더블클릭하면 따라가요.</li>
         <li>🎥 빈 곳 드래그: 회전 · 우클릭/Shift 드래그: 이동 · 휠: 확대 · WASD/QE 키도 돼요.</li>
         <li>⏳ 섬의 하루는 현실 20분이에요. 창을 닫아도 섬의 시간은 계속 흘러요.</li>
+        <li>🤧 춥거나 비·눈을 맞으면 감기에 걸릴 수 있어요. 1~5단계로 나빠지고, 3단계는 독감, 5단계는 요양소에서 떨어져 지내야 해요. 약초·땅속 뿌리·약돌을 찾아 약을 만들면 나아요.</li>
+        <li>🌀 아주 드물게 지진·태풍·쓰나미가 찾아와요. 사람들은 함께 고치고, 모여서 대비책을 궁리해요.</li>
+        <li>🏳️ {GROUP_POP}명이 넘으면 뜻이 맞는 사람끼리 조직을, 모두의 뜻이 맞으면 문명을 세워요. 저마다 역할을 맡지만, 뜻이 너무 다르면 다투다 갈라서기도 해요.</li>
+        <li>⛵ 과학 시대에 이르면 큰 배나 차원문을 만들어 섬 밖 세상에 다녀와요.</li>
         <li>👁 같은 키로 최대 {MAX_VIEWERS}명이 함께 지켜볼 수 있어요.</li>
       </ul>
     </>

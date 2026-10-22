@@ -209,6 +209,12 @@ button {
   color: #6a4a10;
 }
 
+.chip.alert {
+  background: #ffd8cc;
+  color: #a33a1a;
+  font-weight: bold;
+}
+
 .toolbar {
   position: absolute;
   top: 14px;
@@ -468,6 +474,69 @@ button {
 .toast.k-arrive { color: #1c7ed6; }
 .chron .k-weather,
 .chron .k-season { color: var(--ink-soft); font-size: 12px; }
+.chron .k-disease,
+.toast.k-disease { color: #2f8a4f; }
+.chron .k-disaster,
+.toast.k-disaster { color: #b23a2a; }
+.chron .k-society,
+.toast.k-society { color: #6a3fb5; }
+.chron .k-voyage,
+.toast.k-voyage { color: #1b6fa8; }
+
+/* ─── 무리 단위 목록 (펼치면 구성원) ─────────────────── */
+.group + .group { border-top: 1px solid var(--line); }
+.group-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto 14px;
+  align-items: center;
+  gap: 0 6px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  border-radius: 10px;
+  padding: 7px 7px;
+  color: inherit;
+}
+.group-row:hover,
+.group-row.open { background: rgba(255, 220, 150, 0.28); }
+.group-row .flag {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+.group-row .gname { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-row .gcount { font-size: 12px; color: var(--ink-soft); }
+.group-row .chev { font-size: 11px; color: var(--ink-soft); }
+.group-row .gstage {
+  grid-column: 2 / span 3;
+  font-size: 11px;
+  color: var(--ink-soft);
+  word-break: keep-all;
+}
+.group-row .gwar { color: #b23a2a; }
+.group .person-row { padding-left: 18px; }
+.person-row .role,
+.plist .role { margin-right: 3px; font-size: 12px; }
+.person-row.away { opacity: 0.7; }
+.plist.inner { margin: 0 0 6px 14px; }
+.glist { margin-bottom: 12px; }
+.person .ill {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #e6f6ea;
+  color: #2f6b45;
+}
+.person .ill.lv3,
+.person .ill.lv4 { background: #fff0d6; color: #9a5a00; }
+.person .ill.lv5 { background: #ffd8cc; color: #a33a1a; font-weight: bold; }
 
 .plist {
   list-style: none;

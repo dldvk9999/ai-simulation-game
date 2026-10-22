@@ -21,10 +21,12 @@ export const WALK_SPEED = 2.4 / TIME_SCALE;
 export const ANIMAL_SPEED = 2.0 / TIME_SCALE;
 
 export const START_HOUR = 7;
-export const MAX_POP = 24;
+export const MAX_POP = 30;
+/** 이만큼 모이면 조직이나 문명을 이룰 수 있다 */
+export const GROUP_POP = 10;
 export const CHRONICLE_LIMIT = 240;
 
 /** 오래 비워둔 섬을 따라잡을 때 허용하는 최대 게임 시간(현실 약 60일). */
 export const MAX_CATCHUP = DAY * 72 * 60;
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

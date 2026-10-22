@@ -9,6 +9,7 @@ import { RAPID_CLICKS } from "@/sim/interactions";
 import type { Terrain } from "@/sim/terrain";
 import { findById } from "@/sim/world";
 import { useAmbience, useRuntime } from "./context";
+import { env } from "./env";
 
 export const camState = {
   tx: 0, tz: 0, ty: 2,
@@ -314,8 +315,17 @@ export function Controls({ terrain }: { terrain: Terrain }) {
     if (py < floor) py = floor;
     px = THREE.MathUtils.clamp(px, -400, 400);
     pz = THREE.MathUtils.clamp(pz, -400, 400);
+    // 지진: 화면이 떨린다
+    const q = env.quake;
+    if (q > 0.01) {
+      const a = q * Math.min(1.2, c.dist * 0.03);
+      px += (Math.random() - 0.5) * a;
+      py += (Math.random() - 0.5) * a * 0.6;
+      pz += (Math.random() - 0.5) * a;
+    }
     camera.position.set(px, py, pz);
     camera.lookAt(c.tx, c.ty, c.tz);
+    amb?.rumble(q);
     camState.camera = camera;
   });
 

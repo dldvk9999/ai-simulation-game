@@ -1,14 +1,16 @@
 import { ANIMAL_SPEED, DAY, HOUR, TIME_SCALE } from "./constants";
+import { FISH_INFO } from "./data";
 import { hourOf, seasonOf } from "./clock";
 import { chance, pick, pRate, rand, range } from "./rng";
 import type { Terrain } from "./terrain";
 import type { AnimalKind, PlantKind, WorldState } from "./types";
-import { addFx, bump, dist, findById, makeAnimal, makeFish, makeItem, makePlant, nearest } from "./world";
+import { addFx, bump, dist, findById, makeAnimal, makeItem, makePlant, nearest, spawnFish } from "./world";
 
 const GROW_DAYS: Record<PlantKind, number> = {
   palm: 5, tree: 5, pine: 6, fruit: 5, bush: 2, fiber: 1, herb: 1.5, crop: 2.5,
 };
-const CAP: Partial<Record<PlantKind, number>> = { palm: 40, tree: 110, pine: 50, fruit: 30, bush: 70, fiber: 70, herb: 20 };
+// 예전보다 1.7배 넉넉하게
+const CAP: Partial<Record<PlantKind, number>> = { palm: 68, tree: 187, pine: 85, fruit: 51, bush: 119, fiber: 119, herb: 34 };
 const TREE_KINDS = new Set<PlantKind>(["palm", "tree", "pine", "fruit"]);
 export const isTree = (k: PlantKind) => TREE_KINDS.has(k);
 
@@ -93,7 +95,7 @@ function crowded(w: WorldState, x: number, z: number, d: number) {
 
 const FLEE: Record<AnimalKind, number> = { rabbit: 5, boar: 3.2, goat: 6, crab: 2.4, fowl: 4.5 };
 const SPEED: Record<AnimalKind, number> = { rabbit: 1.5, boar: 1.1, goat: 1.2, crab: 0.5, fowl: 1.0 };
-export const ANIMAL_CAP: Record<AnimalKind, number> = { rabbit: 14, boar: 6, goat: 7, crab: 10, fowl: 8 };
+export const ANIMAL_CAP: Record<AnimalKind, number> = { rabbit: 24, boar: 10, goat: 12, crab: 17, fowl: 14 };
 export const ANIMAL_NAME: Record<AnimalKind, string> = { rabbit: "토끼", boar: "멧돼지", goat: "산양", crab: "게", fowl: "들닭" };
 
 function habitatOk(T: Terrain, kind: AnimalKind, x: number, z: number) {
@@ -238,13 +240,9 @@ export function dailyAnimals(w: WorldState, T: Terrain) {
 
 export function updateFish(w: WorldState, T: Terrain, dt: number) {
   const season = seasonOf(w.time);
-  const cap = season === 1 ? 18 : season === 3 ? 9 : 14;
-  if (w.fish.length < cap && chance(w, pRate(1 / (1.2 * HOUR), dt))) {
-    const f = makeFish(w, T);
-    if (f) {
-      w.fish.push(f);
-      bump(w);
-    }
+  const cap = season === 1 ? 31 : season === 3 ? 15 : 24;
+  if (w.fish.length < cap && chance(w, pRate(1 / (0.75 * HOUR), dt))) {
+    if (spawnFish(w, T)) bump(w);
   }
   for (let i = w.fish.length - 1; i >= 0; i--) {
     const f = w.fish[i];
@@ -259,12 +257,13 @@ export function updateFish(w: WorldState, T: Terrain, dt: number) {
       continue;
     }
     if (w.time >= f.until || dist(f.x, f.z, f.tx, f.tz) < 0.2) {
+      const [d0, d1] = FISH_INFO[f.kind]?.depth ?? [0.45, 4];
       for (let k = 0; k < 5; k++) {
         const a = rand(w) * Math.PI * 2;
-        const d = range(w, 1.5, 6);
+        const d = range(w, 1.5, f.kind === "tuna" ? 10 : 6);
         const tx = f.x + Math.cos(a) * d, tz = f.z + Math.sin(a) * d;
         const h = T.height(tx, tz);
-        if (h < -0.45 && h > -4) {
+        if (h < -Math.min(0.45, d0) && h > -d1 - 0.5) {
           f.tx = tx;
           f.tz = tz;
           break;
@@ -273,7 +272,7 @@ export function updateFish(w: WorldState, T: Terrain, dt: number) {
       f.until = w.time + range(w, 3, 12) * 60;
     }
     const d = dist(f.x, f.z, f.tx, f.tz);
-    const step = (0.8 / TIME_SCALE) * dt;
+    const step = ((f.kind === "tuna" ? 1.6 : f.kind === "flatfish" ? 0.4 : 0.8) / TIME_SCALE) * dt;
     if (d > 0.01) {
       const k = Math.min(1, step / d);
       f.x += (f.tx - f.x) * k;
@@ -282,7 +281,7 @@ export function updateFish(w: WorldState, T: Terrain, dt: number) {
     }
     // 뭍으로 올라왔으면 (플레이어가 놓았을 때 등) 생선으로
     if (T.height(f.x, f.z) > 0.05 && !T.inPond(f.x, f.z)) {
-      w.items.push(makeItem(w, "fish", f.kind === "bigfish" ? 3 : 1, f.x, f.z, f.gift || w.time));
+      w.items.push(makeItem(w, "fish", FISH_INFO[f.kind]?.qty ?? 1, f.x, f.z, f.gift || w.time));
       w.fish.splice(i, 1);
       bump(w);
     }

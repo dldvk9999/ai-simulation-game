@@ -11,6 +11,25 @@ export interface PersonSummary {
   emoji: string;
   action: string;
   alive: boolean;
+  group: number | null;
+  /** 역할 아이콘 */
+  role: string;
+  ill: number;
+  away: boolean;
+}
+
+export interface GroupSummary {
+  id: number;
+  kind: "org" | "civ";
+  title: string;
+  stage: string;
+  hue: number;
+  count: number;
+  leader: string;
+  war: string | null;
+  /** 따로 터를 잡았는지 */
+  apart: boolean;
+  members: number[];
 }
 
 export interface PersonDetail extends PersonSummary {
@@ -28,6 +47,10 @@ export interface PersonDetail extends PersonSummary {
   carry: string;
   home: string;
   preg: boolean;
+  role: string;
+  illName: string;
+  groupName: string;
+  view: string;
 }
 
 export interface Toast {
@@ -54,8 +77,14 @@ export interface HudState {
   temp: number;
   era: string;
   pop: number;
+  abroad: number;
   generation: number;
   people: PersonSummary[];
+  groups: GroupSummary[];
+  /** 펼쳐 본 무리 */
+  openGroup: number | null;
+  disaster: { name: string; icon: string; coming: boolean } | null;
+  war: boolean;
   selectedId: number | null;
   followId: number | null;
   selected: PersonDetail | null;
@@ -86,8 +115,13 @@ export const useHud = create<HudState>(() => ({
   temp: 18,
   era: "",
   pop: 0,
+  abroad: 0,
   generation: 1,
   people: [],
+  groups: [],
+  openGroup: null,
+  disaster: null,
+  war: false,
   selectedId: null,
   followId: null,
   selected: null,

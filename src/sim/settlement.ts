@@ -1,6 +1,6 @@
 import { DAY, HOUR, TIME_SCALE } from "./constants";
 import { ageYears } from "./clock";
-import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS } from "./data";
+import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
 import { range, rand } from "./rng";
 import type { Terrain } from "./terrain";
 import { josa, thought } from "./text";
@@ -9,8 +9,21 @@ import { addFx, bump, chron, dist, findById, knows, living, makeStructure, stock
 
 // ─── 연구 ──────────────────────────────────────────────────────────────
 
+/** 직접 겪거나 찾아낸 것이 있어야 고민을 시작하는 지식 */
+export function needsMet(w: WorldState, t: TechDef) {
+  const n = t.needs;
+  if (!n) return true;
+  if (n.found && !n.found.every((x) => w.found?.includes(x))) return false;
+  if (n.event && !n.event.some((e) => (w.history?.[e] ?? 0) > 0)) return false;
+  return true;
+}
+
 export const available = (w: WorldState) =>
-  TECHS.filter((t) => !knows(w, t.id) && t.prereq.every((p) => knows(w, p)));
+  TECHS.filter((t) => !knows(w, t.id) && t.prereq.every((p) => knows(w, p)) && needsMet(w, t));
+
+/** 선행 지식은 갖췄는데 약재를 못 찾아 막혀 있는 지식 */
+export const blockedByFound = (w: WorldState) =>
+  TECHS.filter((t) => !knows(w, t.id) && t.prereq.every((p) => knows(w, p)) && t.needs?.found && !needsMet(w, t));
 
 export function currentEra(w: WorldState) {
   let e = 0;
@@ -25,6 +38,9 @@ export function researchMul(w: WorldState) {
   if (knows(w, "science")) m *= 1.25;
   if (w.structures.some((s) => s.type === "library" && s.prog >= 1)) m *= 1.12;
   if (w.structures.some((s) => s.type === "observatory" && s.prog >= 1)) m *= 1.08;
+  // 조직을 이루면 체계적으로, 문명을 세우면 더욱 빠르게 배운다
+  if (w.groups?.some((g) => g.kind === "civ")) m *= w.structures.some((s) => s.type === "hall" && s.prog >= 1) ? 1.32 : 1.25;
+  else if (w.groups?.length) m *= 1.1;
   return m;
 }
 
@@ -38,6 +54,10 @@ export function chooseFocus(w: WorldState) {
   const food = foodTotal(w);
   const cold = w.weather.temp < 12;
   const houses = houseCapacity(w);
+  const sick = living(w).some((p) => (p.ill ?? 0) >= 1);
+  // 겪은 재해에 맞서는 방법은 모두가 머리를 맞대고 먼저 궁리한다
+  const recent = !!w.history && w.time - w.history.lastDisaster < 20 * DAY;
+  const counter = recent ? ["bracing", "forecast", "seawall", "quakeproof"] : [];
   const prio = (id: string) => {
     let p = 1;
     if (id === "fire") p = cold ? 3 : 2.2;
@@ -48,6 +68,11 @@ export function chooseFocus(w: WorldState) {
     if (id === "agriculture") p = 1.4;
     if (id === "clothing" && cold) p = 1.8;
     if (id === "writing") p = 1.3;
+    if (id === "herbs" || id === "remedy") p = sick ? 3 : 1.4;
+    if (id === "medicine") p = sick ? 2.2 : 1.3;
+    if (counter.includes(id)) p = 2.6;
+    if (id === "net" || id === "navigation") p = 1.3;
+    if (id === "shipbuilding") p = 1.4;
     return p;
   };
   av.sort((a, b) => (a.cost / prio(a.id)) - (b.cost / prio(b.id)));
@@ -59,7 +84,7 @@ export function addResearch(w: WorldState, p: Person | null, pts: number, tech?:
   const id = tech ?? w.tech.focus;
   if (!id || knows(w, id)) return;
   const def = TECH_BY_ID[id];
-  if (!def || !def.prereq.every((q) => knows(w, q))) return;
+  if (!def || !def.prereq.every((q) => knows(w, q)) || !needsMet(w, def)) return;
   const v = (w.tech.prog[id] ?? 0) + pts * researchMul(w);
   w.tech.prog[id] = v;
   if (v >= def.cost) discover(w, p, id);
@@ -120,13 +145,16 @@ export function buildMul(w: WorldState) {
   if (knows(w, "wheel")) m *= 1.2;
   if (knows(w, "mathematics")) m *= 1.15;
   if (knows(w, "steam")) m *= 1.3;
+  if (w.groups?.some((g) => g.kind === "civ")) m *= 1.15;
+  else if (w.groups?.length) m *= 1.08;
   return m;
 }
 
 // ─── 집 ────────────────────────────────────────────────────────────────
 
 export const isHouse = (t: StructureType) => HOUSE_TYPES.includes(t);
-export const houses = (w: WorldState) => w.structures.filter((s) => isHouse(s.type) && s.prog >= 1);
+/** 쓸 수 있는 집 (크게 부서진 집은 고치기 전까지 못 쓴다) */
+export const houses = (w: WorldState) => w.structures.filter((s) => isHouse(s.type) && s.prog >= 1 && (s.dmg ?? 0) < 0.6);
 
 export function houseCapacity(w: WorldState) {
   let c = 0;
@@ -138,15 +166,23 @@ export function residents(w: WorldState, houseId: number) {
   return w.people.filter((p) => p.alive && p.home === houseId);
 }
 
+/** 갈라져 나간 무리는 자기 터의 집에서 지내고, 다른 사람은 그 집을 쓰지 않는다 */
+function homeOk(w: WorldState, p: { group?: number | null }, h: Structure) {
+  const g = p.group != null ? w.groups?.find((x) => x.id === p.group) : undefined;
+  if (g?.camp) return h.group === g.id;
+  return h.group == null || !w.groups?.some((x) => x.id === h.group && x.camp);
+}
+
 /** 집 없는 사람을 빈 집에 배정. 가족은 함께. */
 export function assignHomes(w: WorldState) {
-  const hs = houses(w).sort((a, b) => (STRUCTS[b.type].tier ?? 0) - (STRUCTS[a.type].tier ?? 0));
+  const all = houses(w).sort((a, b) => (STRUCTS[b.type].tier ?? 0) - (STRUCTS[a.type].tier ?? 0));
   for (const p of w.people) {
     if (!p.alive) continue;
-    if (p.home != null && !hs.some((h) => h.id === p.home)) p.home = null;
+    if (p.home != null && !all.some((h) => h.id === p.home && homeOk(w, p, h))) p.home = null;
   }
   for (const p of w.people) {
     if (!p.alive || p.home != null) continue;
+    const hs = all.filter((h) => homeOk(w, p, h));
     const partner = findById(w.people, p.partner);
     const parent = p.parents.map((id) => findById(w.people, id)).find((q) => q?.alive && q.home != null);
     const prefer = partner?.home ?? (ageYears(p.birth, w.time) < 16 ? parent?.home : null);
@@ -177,6 +213,11 @@ export function projectNeed(w: WorldState): Stock {
     if (s.paid) continue;
     for (const [r, n] of Object.entries(STRUCTS[s.type].cost) as [Res, number][]) out[r] = (out[r] ?? 0) + n;
   }
+  // 부서진 것을 고칠 재료
+  for (const s of w.structures) {
+    if (!s.dmg || s.fix || s.prog < 1) continue;
+    for (const [r, n] of Object.entries(STRUCTS[s.type].cost) as [Res, number][]) out[r] = (out[r] ?? 0) + Math.max(1, Math.ceil(n * s.dmg * 0.5));
+  }
   return out;
 }
 
@@ -203,6 +244,10 @@ export function planProject(w: WorldState, T: Terrain) {
   const want: StructureType[] = [];
 
   if (best && cap < pop) want.push(best);
+  // 많이 아픈 사람이 있으면 떨어져 쉴 요양소부터
+  const sickest = living(w).reduce((m, p) => Math.max(m, p.ill ?? 0), 0);
+  if (knows(w, "leanto") && !has(w, "infirmary") && (sickest >= 4 || (knows(w, "remedy") && pop >= 8))) want.unshift("infirmary");
+  if (planGroupHouse(w, T)) return;
   if (knows(w, "basket") && !has(w, "storage")) want.push("storage");
   if (knows(w, "polished") && !has(w, "workshop")) want.push("workshop");
   if (knows(w, "drying") && !has(w, "rack")) want.push("rack");
@@ -230,6 +275,10 @@ export function planProject(w: WorldState, T: Terrain) {
   if (knows(w, "windmill") && !has(w, "windmill")) want.push("windmill");
   if (knows(w, "astronomy") && !has(w, "observatory")) want.push("observatory");
   if (knows(w, "electricity") && !has(w, "lighthouse")) want.push("lighthouse");
+  if (knows(w, "seawall") && w.structures.filter((s) => s.type === "seawall").length < 3) want.unshift("seawall");
+  if (knows(w, "shipbuilding") && !has(w, "shipyard")) want.push("shipyard");
+  if (knows(w, "portal") && !has(w, "portal")) want.push("portal");
+  if (knows(w, "hut") && w.groups?.some((g) => g.kind === "civ") && !has(w, "hall")) want.push("hall");
   if (best && cap < pop + 2 && pop >= 3) want.push(best);
   if (knows(w, "stoneaxe") && w.structures.filter((s) => s.type === "bench").length < Math.min(3, 1 + Math.floor(pop / 4))) want.push("bench");
 
@@ -241,6 +290,26 @@ export function planProject(w: WorldState, T: Terrain) {
       return;
     }
   }
+}
+
+/** 갈라져 나간 무리는 자기 터에 집을 짓는다 */
+function planGroupHouse(w: WorldState, T: Terrain) {
+  const best = bestHouse(w);
+  if (!best) return false;
+  for (const g of w.groups ?? []) {
+    if (!g.camp) continue;
+    const ms = w.people.filter((p) => p.alive && !p.away && p.group === g.id && ageYears(p.birth, w.time) >= 3).length;
+    const cap = houses(w).filter((h) => h.group === g.id).reduce((c, h) => c + (STRUCTS[h.type].cap ?? 0), 0);
+    if (cap >= ms) continue;
+    const site = findSite(w, T, best, g.camp);
+    if (!site) continue;
+    const s = makeStructure(w, best, site.x, site.z, site.rot);
+    s.group = g.id;
+    w.structures.push(s);
+    bump(w);
+    return true;
+  }
+  return false;
 }
 
 /** 밭은 따로: 인구에 맞춰 늘린다 */
@@ -285,14 +354,17 @@ const RING: Partial<Record<StructureType, [number, number]>> = {
   observatory: [12, 28],
   grave: [15, 19],
   bench: [5, 16],
+  infirmary: [16, 24],
+  hall: [4, 9],
+  portal: [10, 20],
 };
 
 export function findSite(
-  w: WorldState, T: Terrain, type: StructureType, near?: { x: number; z: number },
+  w: WorldState, T: Terrain, type: StructureType, near?: { x: number; z: number }, ring?: { min: number; max: number },
 ): { x: number; z: number; rot: number } | null {
   const def = STRUCTS[type];
-  if (type === "dock" || type === "lighthouse") return coastSite(w, T, type);
-  const [r0, r1] = near ? [def.radius + 3, def.radius + 9] : RING[type] ?? [5, 15];
+  if (type === "dock" || type === "lighthouse" || type === "seawall" || type === "shipyard") return coastSite(w, T, type);
+  const [r0, r1] = ring ? [ring.min, ring.max] : near ? [def.radius + 3, def.radius + 9] : RING[type] ?? [5, 15];
   const cx = near?.x ?? w.camp.x, cz = near?.z ?? w.camp.z;
   for (let k = 0; k < 160; k++) {
     const grow = 1 + Math.floor(k / 40) * 0.4;
@@ -319,7 +391,7 @@ export function findSite(
     for (const r of w.rocks) if (dist(x, z, r.x, r.z) < def.radius + 1) blocked = true;
     if (blocked) continue;
     clearSite(w, x, z, def.radius + 0.6);
-    const rot = Math.atan2(w.camp.z - z, w.camp.x - x);
+    const rot = Math.atan2(cz - z, cx - x);
     return { x, z, rot };
   }
   return null;
@@ -334,13 +406,19 @@ function clearSite(w: WorldState, x: number, z: number, r: number) {
 function coastSite(w: WorldState, T: Terrain, type: StructureType) {
   let best: { x: number; z: number; rot: number; score: number } | null = null;
   const dock = w.structures.find((s) => s.type === "dock");
+  const side = type === "dock" ? -0.4 : type === "shipyard" ? 0.6 : type === "seawall" ? 1.6 : 3.5;
   for (let k = 0; k < 72; k++) {
     const a = (k / 72) * Math.PI * 2;
-    const sp = T.shorePoint(a, type === "dock" ? -0.4 : 3.5);
+    const sp = T.shorePoint(a, side);
     const d = dist(sp.x, sp.z, w.camp.x, w.camp.z);
     let score: number;
     if (type === "dock") {
       score = -d;
+    } else if (type === "shipyard") {
+      score = -d - (dock && dist(sp.x, sp.z, dock.x, dock.z) < 12 ? 40 : 0);
+    } else if (type === "seawall") {
+      // 마을 앞바다를 막는다
+      score = -d - (T.height(sp.x, sp.z) > 3 ? 30 : 0);
     } else {
       score = T.height(sp.x, sp.z) * 2 - d * 0.1 - (dock && dist(sp.x, sp.z, dock.x, dock.z) < 15 ? 50 : 0);
       if (!T.isLand(sp.x, sp.z)) score -= 100;

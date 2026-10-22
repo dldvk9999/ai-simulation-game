@@ -10,6 +10,7 @@ export class Ambience {
   private muted = false;
   private nextChirp = 0;
   private nextCrackle = 0;
+  private quake: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
   private state = { rain: 0, wind: 0.2, day: 1, fire: 0, sea: 1 };
 
   start() {
@@ -137,6 +138,31 @@ export class Ambience {
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03 + Math.random() * 0.04);
     s.connect(f).connect(g).connect(this.master);
     s.start(t, Math.random() * 2, 0.1);
+  }
+
+  /** 지진의 낮은 울림 (매 프레임 세기를 넘긴다) */
+  rumble(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!this.quake) {
+      if (level < 0.02) return;
+      const s = ctx.createBufferSource();
+      s.buffer = this.noise;
+      s.loop = true;
+      const f = ctx.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.value = 70;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      s.connect(f).connect(g).connect(this.master);
+      s.start();
+      this.quake = { src: s, gain: g };
+    }
+    this.quake.gain.gain.setTargetAtTime(this.muted ? 0 : level * 1.4, ctx.currentTime, 0.15);
+    if (level < 0.005 && this.quake.gain.gain.value < 0.01) {
+      this.quake.src.stop();
+      this.quake = null;
+    }
   }
 
   thunder(distance: number) {

@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { STRUCTS } from "@/sim/data";
 import type { Terrain } from "@/sim/terrain";
 import type { Structure, StructureType } from "@/sim/types";
+import { shipPose } from "@/sim/voyage";
 import { useAmbience, useRuntime, useWorldVersion } from "./context";
 import { env } from "./env";
 import { G, merge, part, vcMat } from "./geo";
@@ -252,6 +253,80 @@ function buildModel(type: StructureType): Model {
           part(G.box, { color: WOOD, pos: [-0.22, 0.75, 0], scale: [0.06, 0.5, 1.6] }),
         ]),
       };
+    case "infirmary":
+      // 하얀 천막에 초록 십자: 아픈 사람이 떨어져 쉬는 곳
+      return {
+        geo: merge([
+          part(G.box, { color: "#a89a72", pos: [0, 0.03, 0], scale: [3.2, 0.06, 2.8] }),
+          ...gable(3.0, 2.6, 1.7, 0.02, "#f3efe6", "#e8e2d4"),
+          part(G.box, { color: "#3fa45b", pos: [1.53, 0.78, 0], scale: [0.04, 0.5, 0.15] }),
+          part(G.box, { color: "#3fa45b", pos: [1.53, 0.78, 0], scale: [0.04, 0.15, 0.5] }),
+          part(G.box, { color: "#d9d2c3", pos: [-0.5, 0.18, 0.6], scale: [1.6, 0.2, 0.6] }),
+          part(G.box, { color: "#d9d2c3", pos: [-0.5, 0.18, -0.6], scale: [1.6, 0.2, 0.6] }),
+          part(G.cyl(0.04, 0.05, 1.9, 4), { color: WOOD_D, pos: [1.4, 0.9, 0] }),
+          part(G.cyl(0.04, 0.05, 1.9, 4), { color: WOOD_D, pos: [-1.4, 0.9, 0] }),
+        ]),
+      };
+    case "seawall": {
+      // 바다를 향해 길게 쌓은 돌둑
+      const parts = [part(G.box, { color: STONE_D, pos: [0, 0.55, 0], scale: [1.3, 1.3, 6.6] })];
+      for (let i = 0; i < 9; i++) parts.push(part(G.dodec(0.35), { color: i % 2 ? STONE : "#b4afa6", pos: [0.62, 0.3 + (i % 3) * 0.35, -2.9 + i * 0.72], scale: [0.6, 0.8, 1] }));
+      parts.push(part(G.box, { color: "#bdb8ae", pos: [0, 1.25, 0], scale: [1.4, 0.18, 6.8] }));
+      return { geo: merge(parts) };
+    }
+    case "banner":
+      return {
+        geo: merge([
+          part(G.cyl(0.05, 0.06, 3.2, 5), { color: WOOD_D, pos: [0, 1.6, 0] }),
+          part(G.ico(0.09, 0), { color: "#e0c070", pos: [0, 3.25, 0] }),
+          ...[0, 1, 2].map((i) => part(G.dodec(0.16), { color: STONE_D, pos: [Math.cos(i * 2.1) * 0.22, 0.08, Math.sin(i * 2.1) * 0.22] })),
+        ]),
+      };
+    case "hall":
+      // 문명을 세우면 모두가 모이는 회관
+      return {
+        geo: merge([
+          part(G.box, { color: "#c9b48a", pos: [0, 0.15, 0], scale: [5.2, 0.3, 4.4] }),
+          part(G.box, { color: "#efe4cc", pos: [-0.3, 1.45, 0], scale: [4.0, 2.3, 3.8] }),
+          ...[-1.4, -0.47, 0.47, 1.4].map((z) => part(G.cyl(0.15, 0.17, 2.4, 8), { color: "#f6efdf", pos: [2.2, 1.4, z] })),
+          part(G.box, { color: "#d6c49c", pos: [0.25, 2.7, 0], scale: [5.0, 0.22, 4.3] }),
+          ...gable(5.0, 4.3, 1.1, 2.8, "#5d7a9a", "#efe4cc"),
+          part(G.box, { color: "#5a3b26", pos: [1.72, 0.95, 0], scale: [0.06, 1.6, 0.9] }),
+        ]),
+        windows: merge([
+          part(G.box, { color: "#ffffff", pos: [-0.3, 1.7, 1.92], scale: [0.7, 0.8, 0.05] }),
+          part(G.box, { color: "#ffffff", pos: [-0.3, 1.7, -1.92], scale: [0.7, 0.8, 0.05] }),
+        ]),
+      };
+    case "shipyard": {
+      // 바다로 뻗은 경사로와 나무 비계 (배는 따로 그린다)
+      const parts = [
+        part(G.box, { color: "#8f6a45", pos: [1.2, 0.05, 0], scale: [5.4, 0.16, 2.6], rot: [0, 0, -0.08] }),
+        part(G.box, { color: "#a07850", pos: [-1.6, 0.3, 1.7], scale: [2.2, 0.5, 0.9] }),
+      ];
+      for (let i = 0; i < 4; i++) {
+        parts.push(part(G.cyl(0.07, 0.08, 3.2, 5), { color: WOOD_D, pos: [-0.8 + i * 1.3, 1.5, 1.45] }));
+        parts.push(part(G.cyl(0.07, 0.08, 3.2, 5), { color: WOOD_D, pos: [-0.8 + i * 1.3, 1.5, -1.45] }));
+      }
+      parts.push(part(G.box, { color: WOOD, pos: [1.15, 3.1, 1.45], scale: [4.3, 0.12, 0.12] }));
+      parts.push(part(G.box, { color: WOOD, pos: [1.15, 3.1, -1.45], scale: [4.3, 0.12, 0.12] }));
+      parts.push(part(G.box, { color: "#c9b48a", pos: [-1.6, 0.62, 1.7], scale: [0.6, 0.18, 0.6] }));
+      return { geo: merge(parts) };
+    }
+    case "portal": {
+      // 돌기둥 사이의 고리 (안쪽 빛은 따로 그린다)
+      const parts = [
+        part(G.cyl(2.4, 2.6, 0.35, 16), { color: "#8c8f99", pos: [0, 0.17, 0] }),
+        part(new THREE.TorusGeometry(1.9, 0.28, 8, 28), { color: "#6d7280", pos: [0, 2.45, 0], rot: [0, Math.PI / 2, 0] }),
+        part(G.box, { color: "#5d6270", pos: [0, 1.1, 2.15], scale: [0.6, 2.0, 0.6] }),
+        part(G.box, { color: "#5d6270", pos: [0, 1.1, -2.15], scale: [0.6, 2.0, 0.6] }),
+      ];
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        parts.push(part(G.box, { color: "#9fe8ff", pos: [0, 2.45 + Math.sin(a) * 1.9, Math.cos(a) * 1.9], scale: [0.36, 0.16, 0.16], rot: [a, 0, 0] }));
+      }
+      return { geo: merge(parts) };
+    }
   }
 }
 
@@ -266,6 +341,13 @@ const windowMat = new THREE.MeshStandardMaterial({ color: "#bfe3ff", emissive: n
 const scaffoldMat = new THREE.MeshStandardMaterial({ color: "#c9a26b", flatShading: true, transparent: true, opacity: 0.85 });
 const ghostMat = new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.18, depthWrite: false });
 const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 4);
+const rubbleGeo = merge([
+  part(G.box, { color: "#7a5235", pos: [1.1, 0.08, 0.6], scale: [0.9, 0.12, 0.18], rot: [0, 0.6, 0.1] }),
+  part(G.box, { color: "#8c6a48", pos: [0.9, 0.1, -0.7], scale: [0.7, 0.12, 0.16], rot: [0, -0.4, -0.15] }),
+  part(G.dodec(0.18), { color: "#8c877f", pos: [-1.0, 0.1, 0.8] }),
+  part(G.dodec(0.14), { color: "#9b968e", pos: [-0.8, 0.08, -0.9] }),
+  part(G.box, { color: "#6e4a30", pos: [-1.2, 0.07, 0], scale: [0.18, 0.1, 0.8], rot: [0, 0.3, 0] }),
+]);
 
 const flameGeo = new THREE.ConeGeometry(0.32, 0.9, 6, 1, true);
 const flameInnerGeo = new THREE.ConeGeometry(0.18, 0.55, 6);
@@ -293,12 +375,22 @@ function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
     return q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -s.rot));
   }, [flatOnGround, s.x, s.z, s.rot, terrain]);
+  // 재해로 부서지면 기울고 내려앉는다. 고치는 동안에는 비계가 선다
+  const dmg = s.dmg ?? 0;
   return (
     <group position={[s.x, groundY, s.z]} quaternion={tilt}>
-      <group scale={[1, sy, 1]}>
+      <group scale={[1, sy * (1 - dmg * 0.3), 1]} rotation={[dmg * 0.14, 0, dmg * 0.1]}>
         <mesh geometry={model.geo} material={vcMat} castShadow receiveShadow />
         {model.windows && <mesh geometry={model.windows} material={windowMat} />}
       </group>
+      {dmg > 0 && (
+        <>
+          <mesh geometry={rubbleGeo} material={vcMat} scale={Math.max(0.6, def.radius * 0.55)} castShadow />
+          {[[1, 1], [-1, -1]].map(([x, z], i) => (
+            <mesh key={i} geometry={poleGeo} material={scaffoldMat} position={[x * def.radius * 0.8, 1, z * def.radius * 0.8]} scale={[1, 2, 1]} />
+          ))}
+        </>
+      )}
       {!done && (
         <>
           <mesh geometry={model.geo} material={ghostMat} />
@@ -426,14 +518,20 @@ function Specials({ terrain }: { terrain: Terrain }) {
   const version = useWorldVersion(500);
   const mills = useRef<THREE.Group[]>([]);
   const beams = useRef<THREE.Group[]>([]);
-  const { windmills, lighthouses } = useMemo(() => {
+  const { windmills, lighthouses, banners, shipyards, portals } = useMemo(() => {
     const w = rt.world;
+    const done = (t: StructureType) => (w ? w.structures.filter((s) => s.type === t && s.prog >= 1) : []);
     return {
-      windmills: w ? w.structures.filter((s) => s.type === "windmill" && s.prog >= 1) : [],
-      lighthouses: w ? w.structures.filter((s) => s.type === "lighthouse" && s.prog >= 1) : [],
+      windmills: done("windmill"),
+      lighthouses: done("lighthouse"),
+      banners: (w ? w.structures.filter((s) => s.type === "banner") : []).map((s) => ({ s, hue: w?.groups.find((g) => g.id === s.group)?.hue ?? 0.1 })),
+      shipyards: done("shipyard"),
+      portals: done("portal"),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
+  const flags = useRef<THREE.Mesh[]>([]);
+  const ships = useRef<THREE.Group[]>([]);
   const bladeGeo = useMemo(
     () => merge([0, 1, 2, 3].map((i) => part(G.box, { color: "#efe6d2", pos: [0, Math.cos((i * Math.PI) / 2) * 1.5, Math.sin((i * Math.PI) / 2) * 1.5], scale: [0.06, i % 2 ? 0.45 : 3.0, i % 2 ? 3.0 : 0.45] }))),
     [],
@@ -441,6 +539,25 @@ function Specials({ terrain }: { terrain: Terrain }) {
   useFrame((state, dt) => {
     const t = state.clock.elapsedTime;
     for (const m of mills.current) if (m) m.rotation.x += dt * (0.4 + env.wind * 1.6);
+    flags.current.forEach((m, i) => {
+      if (!m) return;
+      m.rotation.y = env.windAngle + Math.sin(t * (1.5 + env.wind * 3) + i) * (0.15 + env.wind * 0.25);
+      m.scale.x = 1 - Math.abs(Math.sin(t * 3 + i)) * 0.08;
+    });
+    const w = rt.world;
+    shipyards.forEach((s, i) => {
+      const g = ships.current[i];
+      if (!g || !w) return;
+      const pose = shipPose(w, s, env.time);
+      g.visible = !!pose;
+      if (!pose) return;
+      g.position.set(pose.x, Math.sin(t * 1.1 + i) * 0.08 + 0.05, pose.z);
+      g.rotation.set(Math.sin(t * 0.9 + i) * 0.03, -pose.rot, Math.sin(t * 0.7) * 0.04);
+    });
+    portalMat.uniforms.uTime.value = t;
+    const busy = w?.voyages.some((v) => v.via === "portal" && (!v.left || Math.abs(env.time - v.left) < 1800 || Math.abs(v.back - env.time) < 1800));
+    const u = portalMat.uniforms.uGlow;
+    u.value += ((busy ? 1.6 : 0.8) - u.value) * Math.min(1, dt * 2);
     for (const b of beams.current) {
       if (!b) continue;
       b.rotation.y = t * 0.6;
@@ -462,6 +579,34 @@ function Specials({ terrain }: { terrain: Terrain }) {
           </group>
         </group>
       ))}
+      {banners.map(({ s, hue }, i) => (
+        <group key={s.id} position={[s.x, terrain.height(s.x, s.z) + 2.75, s.z]}>
+          <mesh
+            ref={(m) => {
+              if (m) flags.current[i] = m;
+            }}
+            geometry={flagGeo}
+            material={flagMat(hue)}
+            castShadow
+          />
+        </group>
+      ))}
+      {shipyards.map((s, i) => (
+        <group
+          key={s.id}
+          ref={(g) => {
+            if (g) ships.current[i] = g;
+          }}
+        >
+          <mesh geometry={shipGeo} material={vcMat} castShadow />
+          <mesh geometry={sailGeo} material={sailMat} position={[0.2, 3.2, 0]} castShadow />
+        </group>
+      ))}
+      {portals.map((s) => (
+        <group key={s.id} position={[s.x, terrain.height(s.x, s.z), s.z]} rotation-y={-s.rot}>
+          <mesh geometry={portalDiscGeo} material={portalMat} position={[0, 2.45, 0]} rotation-y={Math.PI / 2} />
+        </group>
+      ))}
       {lighthouses.map((s, i) => (
         <group
           key={s.id}
@@ -477,6 +622,50 @@ function Specials({ terrain }: { terrain: Terrain }) {
     </>
   );
 }
+
+// ─── 깃발 · 배 · 차원문 ───────────────────────────────────────────────
+
+const flagGeo = new THREE.PlaneGeometry(1.3, 0.8, 6, 2).translate(0.66, 0, 0);
+const flagMats = new Map<number, THREE.MeshStandardMaterial>();
+function flagMat(hue: number) {
+  const k = Math.round(hue * 64);
+  let m = flagMats.get(k);
+  if (!m) flagMats.set(k, (m = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(k / 64, 0.62, 0.55), side: THREE.DoubleSide, flatShading: true })));
+  return m;
+}
+
+/** 섬 밖으로 나가는 큰 돛배 */
+const shipGeo = merge([
+  part(G.box, { color: "#7a5235", pos: [0, 0.35, 0], scale: [5.2, 0.9, 1.7] }),
+  part(G.cone(0.85, 1.4, 4), { color: "#7a5235", pos: [3.25, 0.35, 0], rot: [0, 0, -Math.PI / 2], scale: [1, 1, 0.75] }),
+  part(G.box, { color: "#a07850", pos: [0, 0.85, 0], scale: [5.0, 0.12, 1.5] }),
+  part(G.box, { color: "#5a3b26", pos: [-2.2, 1.25, 0], scale: [1.0, 0.7, 1.4] }),
+  part(G.cyl(0.08, 0.1, 5.4, 6), { color: "#5a3b26", pos: [0.2, 3.4, 0] }),
+  part(G.box, { color: "#c2763d", pos: [0, 0.05, 0], scale: [5.25, 0.2, 1.75] }),
+]);
+const sailGeo = new THREE.BoxGeometry(0.06, 3.4, 2.6);
+const sailMat = new THREE.MeshStandardMaterial({ color: "#f4efe2", flatShading: true });
+
+const portalDiscGeo = new THREE.CircleGeometry(1.75, 48);
+const portalMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  uniforms: { uTime: { value: 0 }, uGlow: { value: 0.8 } },
+  vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform float uTime; uniform float uGlow; varying vec2 vUv;
+    void main() {
+      vec2 p = vUv * 2.0 - 1.0;
+      float r = length(p);
+      float a = atan(p.y, p.x);
+      float swirl = sin(a * 3.0 + r * 9.0 - uTime * 2.4) * 0.5 + 0.5;
+      float ring = smoothstep(1.0, 0.82, r);
+      vec3 col = mix(vec3(0.35, 0.2, 0.9), vec3(0.4, 0.95, 1.0), swirl);
+      col = mix(col, vec3(1.0), smoothstep(0.35, 0.0, r) * 0.8);
+      gl_FragColor = vec4(col * uGlow, ring * (0.55 + swirl * 0.35));
+    }`,
+});
 
 /** 창고 옆에 쌓인 자원 */
 function Stockpile({ terrain }: { terrain: Terrain }) {
