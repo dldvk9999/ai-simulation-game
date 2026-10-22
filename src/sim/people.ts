@@ -1,6 +1,7 @@
 import { DAY, HOUR, MAX_POP, TIME_SCALE } from "./constants";
 import { ageYears, hourOf, isEvening, isNight } from "./clock";
 import { STRUCTS, TECH_BY_ID } from "./data";
+import { moraleOf, shiftMorale } from "./morale";
 import { clamp } from "./noise";
 import { chance, pick, range } from "./rng";
 import {
@@ -124,7 +125,7 @@ export function homeOf(w: WorldState, p: Person) {
 export function sheltered(w: WorldState, p: Person) {
   const a = p.act;
   if (!a || a.ph !== 1) return false;
-  if (a.k !== "sleep" && a.k !== "shelter" && a.k !== "rest" && a.k !== "isolate") return false;
+  if (a.k !== "sleep" && a.k !== "shelter" && a.k !== "rest" && a.k !== "isolate" && a.k !== "hide") return false;
   const h = a.k === "isolate"
     ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1)
     : homeOf(w, p) ?? (a.k === "rest" ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1) : undefined);
@@ -201,6 +202,10 @@ export function updateEmotions(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   }
   if (ctx.weather === "storm" && !sheltered(w, p)) e.fear = Math.max(e.fear, 0.25 * p.sens.fear * (p.fears === "storm" ? 1.6 : 1));
   if (ctx.weather === "clear" && n.hunger > 50 && n.energy > 40) e.joy += 0.02 * h * p.sens.joy;
+  // 마을의 사기가 마음에도 번진다
+  const mo = moraleOf(w);
+  if (mo < 40) e.sadness += ((40 - mo) / 40) * 0.05 * h * p.sens.sadness;
+  else if (mo > 78) e.joy += ((mo - 78) / 22) * 0.03 * h * p.sens.joy;
   for (const k of Object.keys(e) as Emotion[]) e[k] = clamp(e[k], 0, 1);
 }
 
@@ -266,6 +271,17 @@ export function perceive(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   };
   for (const it of w.items) if (!it.held) notice(it.id, it.x, it.z, it.gift);
   for (const a of w.animals) if (!a.held) notice(a.id, a.x, a.z, a.gift);
+
+  // 섬 바깥쪽의 광맥 지대를 알아본다
+  if (!w.found.includes("vein") && ctx.T.inMine(p.x, p.z, 12)) {
+    w.found.push("vein");
+    feel(w, p, "surprise", 0.5);
+    feel(w, p, "joy", 0.3, false);
+    say(w, p, "foundVein", {}, "⛰️", true);
+    addFx(w, "eureka", p.x, p.z, p.id);
+    chron(w, "discover", `${josa(p.name, "이/가")} 섬 바깥쪽 바위 언덕에서 울긋불긋한 광석이 박힌 광맥 지대를 발견했다.`);
+    addResearch(w, p, 30, "mining");
+  }
 }
 
 // ─── 생과 사 ───────────────────────────────────────────────────────────
@@ -277,6 +293,7 @@ const CAUSE: Record<string, string> = {
   old: "노환",
   injury: "부상",
   ill: "병",
+  beast: "맹수의 습격",
 };
 
 export function checkDeath(w: WorldState, T: Terrain, p: Person) {
@@ -300,7 +317,8 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
   const yrs = Math.floor(age(w, p));
   w.stats.deaths++;
   if (cause === "old") chron(w, "death", `${josa(p.name, "이/가")} 평화롭게 눈을 감았다. (향년 ${yrs}세)`);
-  else chron(w, "death", `${josa(p.name, "이/가")} ${CAUSE[cause] ?? cause}${cause === "injury" ? "으" : ""}로 세상을 떠났다. (${yrs}세)`);
+  else chron(w, "death", `${josa(p.name, "이/가")} ${josa(CAUSE[cause] ?? cause, "으로/로")} 세상을 떠났다. (${yrs}세)`);
+  shiftMorale(w, cause === "old" ? -2 : -6);
   const partner = findById(w.people, p.partner);
   if (partner) partner.partner = null;
   p.partner = null;
@@ -430,6 +448,7 @@ export function hourlyPeople(w: WorldState) {
     }
     w.people.push(baby);
     w.stats.births++;
+    shiftMorale(w, 3);
     addFx(w, "birth", f.x, f.z, baby.id);
     const parentsLabel = father ? `${josa(f.name, "과/와")} ${father.name}` : f.name;
     chron(w, "birth", `${parentsLabel}의 아이 '${baby.name}'${josa(baby.name, "이/가").slice(baby.name.length)} 태어났다.`);

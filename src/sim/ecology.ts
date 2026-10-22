@@ -9,8 +9,8 @@ import { addFx, bump, dist, findById, makeAnimal, makeItem, makePlant, nearest, 
 const GROW_DAYS: Record<PlantKind, number> = {
   palm: 5, tree: 5, pine: 6, fruit: 5, bush: 2, fiber: 1, herb: 1.5, crop: 2.5,
 };
-// 예전보다 1.7배 넉넉하게
-const CAP: Partial<Record<PlantKind, number>> = { palm: 68, tree: 187, pine: 85, fruit: 51, bush: 119, fiber: 119, herb: 34 };
+// 처음보다 1.7배 넉넉하게, 섬이 넓어진 만큼 또 두 배
+const CAP: Partial<Record<PlantKind, number>> = { palm: 136, tree: 374, pine: 170, fruit: 102, bush: 238, fiber: 238, herb: 68 };
 const TREE_KINDS = new Set<PlantKind>(["palm", "tree", "pine", "fruit"]);
 export const isTree = (k: PlantKind) => TREE_KINDS.has(k);
 
@@ -95,7 +95,7 @@ function crowded(w: WorldState, x: number, z: number, d: number) {
 
 const FLEE: Record<AnimalKind, number> = { rabbit: 5, boar: 3.2, goat: 6, crab: 2.4, fowl: 4.5 };
 const SPEED: Record<AnimalKind, number> = { rabbit: 1.5, boar: 1.1, goat: 1.2, crab: 0.5, fowl: 1.0 };
-export const ANIMAL_CAP: Record<AnimalKind, number> = { rabbit: 24, boar: 10, goat: 12, crab: 17, fowl: 14 };
+export const ANIMAL_CAP: Record<AnimalKind, number> = { rabbit: 48, boar: 20, goat: 24, crab: 34, fowl: 28 };
 export const ANIMAL_NAME: Record<AnimalKind, string> = { rabbit: "토끼", boar: "멧돼지", goat: "산양", crab: "게", fowl: "들닭" };
 
 function habitatOk(T: Terrain, kind: AnimalKind, x: number, z: number) {
@@ -240,7 +240,7 @@ export function dailyAnimals(w: WorldState, T: Terrain) {
 
 export function updateFish(w: WorldState, T: Terrain, dt: number) {
   const season = seasonOf(w.time);
-  const cap = season === 1 ? 31 : season === 3 ? 15 : 24;
+  const cap = season === 1 ? 46 : season === 3 ? 22 : 36;
   if (w.fish.length < cap && chance(w, pRate(1 / (0.75 * HOUR), dt))) {
     if (spawnFish(w, T)) bump(w);
   }

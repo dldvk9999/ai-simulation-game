@@ -276,7 +276,7 @@ function demand(w: WorldState, g: Group): Record<Role, number> {
     healer: knows(w, "herbs") ? 0.3 + sick * 0.6 : sick * 0.3,
     cook: knows(w, "cooking") ? 0.4 : 0,
     sailor: knows(w, "boat") ? 0.5 + (knows(w, "navigation") ? 0.4 : 0) : 0,
-    guard: g.war ? 1.4 : 0,
+    guard: g.war ? 1.4 : (w.history?.beast ?? 0) > 0 ? 0.6 : 0,
   };
 }
 

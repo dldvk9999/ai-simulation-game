@@ -2,16 +2,18 @@
 // 겪고 나면 사람들은 모여 대비책을 궁리하고(연구), 부서진 것을 함께 고친다.
 import { DAY, HOUR, MIN } from "./constants";
 import { seasonOf } from "./clock";
+import { harm } from "./building";
 import { STRUCTS } from "./data";
 import { clamp } from "./noise";
 import { isTree } from "./ecology";
 import { feel, lying, say } from "./people";
 import { chance, range, weighted } from "./rng";
-import { available, isHouse } from "./settlement";
+import { shiftMorale } from "./morale";
+import { available } from "./settlement";
 import type { Terrain } from "./terrain";
 import { josa } from "./text";
 import type { Disaster, DisasterType, Res, Structure, StructureType, WorldState } from "./types";
-import { addFx, bump, chron, dist, knows, living, makeItem } from "./world";
+import { addFx, bump, chron, knows, living, makeItem } from "./world";
 
 export const DISASTER_NAME: Record<DisasterType, string> = { quake: "지진", typhoon: "태풍", tsunami: "쓰나미" };
 export const DISASTER_ICON: Record<DisasterType, string> = { quake: "🫨", typhoon: "🌀", tsunami: "🌊" };
@@ -23,13 +25,15 @@ const QUAKE: Partial<Record<StructureType, number>> = {
   leanto: 0.5, hut: 0.55, loghouse: 0.4, stonehouse: 0.6, storage: 0.5, rack: 0.5, kiln: 0.55, workshop: 0.45,
   smelter: 0.55, well: 0.35, library: 0.5, windmill: 0.6, observatory: 0.55, lighthouse: 0.5, dock: 0.3, bench: 0.2,
   pen: 0.35, infirmary: 0.45, hall: 0.5, shipyard: 0.35, seawall: 0.15, portal: 0.2,
+  watchtower: 0.55, fort: 0.3, battery: 0.3, townhouse: 0.5, apartment: 0.45, forge: 0.45, factory: 0.4, mine: 0.5,
 };
 const WIND: Partial<Record<StructureType, number>> = {
   leanto: 0.45, hut: 0.3, loghouse: 0.12, stonehouse: 0.05, storage: 0.2, rack: 0.5, farm: 0.35, pen: 0.25,
   workshop: 0.3, windmill: 0.25, dock: 0.3, bench: 0.2, infirmary: 0.35, hall: 0.1, shipyard: 0.15, library: 0.06,
   lighthouse: 0.05, observatory: 0.08, kiln: 0.08, smelter: 0.05,
+  watchtower: 0.35, fort: 0.04, battery: 0.04, townhouse: 0.05, apartment: 0.06, forge: 0.1, factory: 0.08, mine: 0.2,
 };
-const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard"]);
+const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard", "watchtower", "mine"]);
 const SPARED = new Set<StructureType>(["grave", "raft", "campfire", "banner"]);
 
 /** 대비책을 알면 덜 부서진다 */
@@ -37,7 +41,7 @@ function sturdiness(w: WorldState, s: Structure, type: DisasterType) {
   let m = 1;
   if (knows(w, "bracing") && WOODEN.has(s.type) && type !== "tsunami") m *= 0.6;
   if (knows(w, "quakeproof") && type === "quake") m *= 0.25;
-  if (knows(w, "masonry") && type === "typhoon" && s.type === "stonehouse") m *= 0.5;
+  if (knows(w, "masonry") && type === "typhoon" && (s.type === "stonehouse" || s.type === "townhouse")) m *= 0.5;
   return m;
 }
 
@@ -290,66 +294,7 @@ function fellTrees(w: WorldState, p: number, d: Disaster) {
 
 /** 구조물을 부순다. 1을 넘으면 무너진다 */
 export function damage(w: WorldState, T: Terrain, s: Structure, amount: number, type: DisasterType) {
-  const d = w.disaster;
-  if (s.prog < 1) {
-    // 짓던 것은 공사가 뒤로 밀린다
-    s.prog = Math.max(0, s.prog - amount * 0.6);
-    return;
-  }
-  const before = s.dmg ?? 0;
-  s.dmg = Math.min(1, before + amount);
-  addFx(w, "collapse", s.x, s.z, s.id, s.dmg);
-  if (s.type === "storage") {
-    // 창고가 부서지면 모아둔 것의 일부를 잃는다
-    for (const r of Object.keys(w.stock) as Res[]) {
-      const v = w.stock[r] ?? 0;
-      const lost = v * Math.min(0.5, amount * 0.35);
-      w.stock[r] = v - lost;
-      if (d) d.toll.lost += lost;
-    }
-  }
-  if (s.type === "farm") {
-    for (const c of w.plants.filter((p) => p.kind === "crop" && p.farm === s.id)) {
-      if (chance(w, 0.6)) {
-        w.plants = w.plants.filter((p) => p !== c);
-        if (d) d.toll.crops++;
-      }
-    }
-  }
-  // 안에 있던 사람이 다친다
-  if (isHouse(s.type) || s.type === "infirmary" || s.type === "hall" || s.type === "library") {
-    for (const p of living(w)) {
-      if (dist(p.x, p.z, s.x, s.z) > STRUCTS[s.type].radius + 0.5) continue;
-      if (!chance(w, Math.min(0.9, amount))) continue;
-      p.health = Math.max(1, p.health - range(w, 10, 25) * (type === "quake" ? 1 : 0.6));
-      feel(w, p, "fear", 0.4);
-      say(w, p, "hurt", {}, "🤕", true);
-      if (d) d.toll.hurt++;
-    }
-  }
-  if (s.dmg >= 1) {
-    ruin(w, T, s);
-    if (d) d.toll.ruined++;
-  } else if (before < 0.15 && d) d.toll.broken++;
-  bump(w);
-}
-
-/** 무너진 자리에는 쓸 만한 잔해가 남는다 */
-function ruin(w: WorldState, T: Terrain, s: Structure) {
-  const cost = STRUCTS[s.type].cost;
-  for (const [r, n] of Object.entries(cost) as [Res, number][]) {
-    if (r !== "wood" && r !== "stone" && r !== "stick") continue;
-    const k = Math.min(4, Math.floor(n * 0.3));
-    for (let i = 0; i < k; i++) {
-      const x = s.x + range(w, -2, 2), z = s.z + range(w, -2, 2);
-      if (T.height(x, z) > 0.1) w.items.push(makeItem(w, r, 1, x, z));
-    }
-  }
-  if (s.type === "farm") for (const c of w.plants.filter((p) => p.kind === "crop" && p.farm === s.id)) w.plants = w.plants.filter((p) => p !== c);
-  w.structures = w.structures.filter((x) => x !== s);
-  for (const p of w.people) if (p.home === s.id) p.home = null;
-  for (const x of w.structures) if (x.replaces === s.id) x.replaces = undefined;
-  addFx(w, "collapse", s.x, s.z, s.id, 1);
+  harm(w, T, s, amount, type, w.disaster?.toll);
 }
 
 function harvestEarly(w: WorldState) {
@@ -373,6 +318,7 @@ function finish(w: WorldState, d: Disaster) {
     : `${josa(name, "이/가")} 지나갔다. 다행히 큰 피해는 없었다.`);
   w.history[d.type]++;
   w.history.lastDisaster = w.time;
+  shiftMorale(w, -(1 + t.broken * 0.8 + t.hurt * 1.5));
   w.history.lastType = d.type;
   w.disaster = null;
   w.timers.disaster = w.time + range(w, 30, 50) * DAY;

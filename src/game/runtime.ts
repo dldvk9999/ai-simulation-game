@@ -2,7 +2,9 @@
 import { actLabel } from "@/sim/ai";
 import { ageYears, clockLabel, dayOf, seasonOf, SEASONS, timeOfDayLabel, yearOf } from "@/sim/clock";
 import { MAX_VIEWERS, SCHEMA_VERSION, SIM_TICK_MS, TIME_SCALE } from "@/sim/constants";
-import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, TECH_BY_ID } from "@/sim/data";
+import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, STRUCTS, TECH_BY_ID } from "@/sim/data";
+import { active, beastName, TOWER, towerRange } from "@/sim/beasts";
+import { floorsOf, hpOf, maxHp, purposeOf } from "@/sim/building";
 import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
 import { ILL_NAME } from "@/sim/disease";
 import { groupStage, groupTitle } from "@/sim/society";
@@ -13,9 +15,9 @@ import { currentEra } from "@/sim/settlement";
 import { advance, step } from "@/sim/step";
 import { getTerrain, Terrain } from "@/sim/terrain";
 import { EMOJI } from "@/sim/text";
-import type { Act, Anim, Fx, Interaction, Person, Res, WorldState } from "@/sim/types";
+import type { Act, Anim, Beast, BeastKind, Fx, Interaction, Person, Res, Structure, WorldState } from "@/sim/types";
 import { createWorld, findById, migrateWorld } from "@/sim/world";
-import { useHud, type GroupSummary, type PersonDetail, type PersonSummary } from "./hud";
+import { useHud, type GroupSummary, type PersonDetail, type PersonSummary, type StructDetail } from "./hud";
 import { compact, Envelope, gzipBytes, LocalTransport, Member, pack, SupabaseTransport, Transport, unpack } from "./net";
 
 export interface JoinResponse {
@@ -49,6 +51,9 @@ interface Dyn {
   i: [number, number, number, string | 0][];
   fx: Fx[];
   ds: WorldState["disaster"];
+  /** 맹수 [id, x, z, 방향, 상태, 체력] */
+  bs?: [number, number, number, number, Beast["st"], number][];
+  mo?: number;
 }
 
 const NEED_KEYS = ["hunger", "thirst", "energy", "warmth", "social", "fun"] as const;
@@ -69,7 +74,8 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage"]);
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast"]);
+const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅" };
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
 export function normalizeWorld(raw: WorldState): WorldState {
@@ -86,6 +92,21 @@ export function normalizeWorld(raw: WorldState): WorldState {
 }
 
 const chronCount = (w: WorldState) => w.stats.chron ?? w.chronicle.length;
+
+function beastAlert(w: WorldState) {
+  const list = w.beasts.filter(active);
+  if (!list.length) return null;
+  const b = list.reduce((m, x) => (x.pow > m.pow ? x : m), list[0]);
+  return { name: beastName(b), icon: BEAST_ICON[b.kind] ?? "🐾", count: list.length };
+}
+
+function towerNote(w: WorldState, s: Structure) {
+  if (s.type === "mine") return "곡괭이로 캔 광석을 여기 내려놓는다";
+  if (s.type === "forge") return "청동검 · 철창 · 총 · 장신구를 만든다";
+  if (s.type === "factory") return "기계로 소총을 만든다";
+  void w;
+  return "";
+}
 
 export const seedOf = (worldId: string) => parseInt(worldId.slice(0, 8), 16) ^ hashString(worldId);
 
@@ -305,6 +326,8 @@ export class GameRuntime {
       i: w.items.filter((i) => i.held).map((i) => [i.id, r1(i.x), r1(i.z), i.held ?? 0]),
       fx,
       ds: w.disaster,
+      bs: w.beasts.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp)]),
+      mo: Math.round(w.morale),
     };
   }
 
@@ -348,6 +371,15 @@ export class GameRuntime {
       }
       a.x = x; a.z = z; a.rot = rot; a.st = st as typeof a.st; a.held = held || null;
     }
+    for (const [id, x, z, rot, st, hp] of d.bs ?? []) {
+      const b = findById(w.beasts, id);
+      if (!b) {
+        unknown = true;
+        continue;
+      }
+      b.x = x; b.z = z; b.rot = rot; b.st = st; b.hp = hp;
+    }
+    if (d.mo != null) w.morale = d.mo;
     for (const [id, x, z, rot, st, held] of d.f) {
       const f = findById(w.fish, id);
       if (!f) continue;
@@ -606,6 +638,9 @@ export class GameRuntime {
         ? { name: DISASTER_NAME[D.type], icon: DISASTER_ICON[D.type], coming: t < D.start }
         : null,
       war: groups.some((g) => g.war),
+      morale: Math.round(w.morale ?? 70),
+      beast: beastAlert(w),
+      structure: hud.structId != null ? this.structDetail(hud.structId) : null,
       generation: w.stats.generation,
       people: summaries,
       selected: sel ? this.detail(sel) : null,
@@ -622,6 +657,35 @@ export class GameRuntime {
       toasts: toasts.slice(-4),
       isHost: this.isHost,
     });
+  }
+
+  private structDetail(id: number): StructDetail | null {
+    const w = this.world!;
+    const s = findById(w.structures, id);
+    if (!s) {
+      useHud.setState({ structId: null });
+      return null;
+    }
+    const def = STRUCTS[s.type];
+    const dmg = s.dmg ?? 0;
+    const state = s.plan === 0 && s.prog < 1 ? "설계를 기다리는 중"
+      : s.prog < 1 ? `짓는 중 ${Math.round(s.prog * 100)}%`
+      : dmg >= 0.6 ? "크게 부서져 쓸 수 없음 · 고칠 사람을 기다리는 중"
+      : dmg > 0 ? "부서진 곳이 있음"
+      : "튼튼함";
+    const who = def.cap ? w.people.filter((p) => p.alive && p.home === s.id).map((p) => p.name).join(", ") : "";
+    const note = TOWER[s.type] ? `맹수가 오면 위에 올라가 쏜다 (사거리 ${towerRange(s)})` : towerNote(w, s);
+    return {
+      id: s.id,
+      name: s.type === "grave" && s.name ? `${s.name}의 무덤` : def.name,
+      floors: floorsOf(s),
+      use: purposeOf(s.type),
+      hp: hpOf(s),
+      max: maxHp(s),
+      state,
+      who: who ? `사는 사람: ${who}` : def.cap ? "빈 집" : "",
+      note,
+    };
   }
 
   private detail(p: Person): PersonDetail {
@@ -676,7 +740,7 @@ export class GameRuntime {
       skills,
       outfit: p.outfit,
       carry: p.carry ? RES_NAME[p.carry.res] : "",
-      home: home ? (home.type === "leanto" ? "움막" : home.type === "hut" ? "오두막" : home.type === "loghouse" ? "통나무집" : "돌집") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
+      home: home ? STRUCTS[home.type].name + (home.lv && home.lv > 1 ? ` ${home.lv}층` : "") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
       preg: !!p.preg,
       group: p.group ?? null,
       role: p.role ? `${ROLE_ICON[p.role]} ${ROLE_NAME[p.role]}` : "",

@@ -1,16 +1,19 @@
 import { runPerson } from "./ai";
+import { dailyBeasts, updateBeasts } from "./beasts";
 import { DAY, HOUR, MAX_CATCHUP, TIME_SCALE } from "./constants";
 import { dayOf, seasonOf, SEASONS } from "./clock";
 import { dailyAnimals, updateAnimals, updateFish, updateItems, updatePlants, updateStructures } from "./ecology";
 import { dailyDisaster, updateDisaster } from "./disaster";
 import { spreadIllness, updateIllness } from "./disease";
+import { METAL_INFO } from "./data";
+import { dailyMorale } from "./morale";
 import { checkDeath, dailyPeople, hourlyPeople, makeCtx, perceive, updateEmotions, updateNeeds } from "./people";
-import { chooseFocus, planFarms, planProject } from "./settlement";
+import { chooseFocus, foodTotal, houseCapacity, planFarms, planProject } from "./settlement";
 import { dailySociety } from "./society";
 import { getTerrain } from "./terrain";
 import { josa } from "./text";
 import type { WorldState } from "./types";
-import { chron } from "./world";
+import { chron, living } from "./world";
 import { dailyVoyage, updateVoyages } from "./voyage";
 import { updateWeather } from "./weather";
 
@@ -23,6 +26,7 @@ export function step(w: WorldState, dt: number) {
   updateDisaster(w, T);
   updatePlants(w, T, dt);
   updateAnimals(w, T, dt);
+  updateBeasts(w, T, dt);
   updateFish(w, T, dt);
   updateStructures(w, dt);
   updateItems(w, T, dt);
@@ -64,8 +68,11 @@ function daily(w: WorldState) {
   dailySociety(w, T);
   dailyDisaster(w);
   dailyVoyage(w);
-  // 바위는 천천히 다시 드러난다
-  for (const r of w.rocks) r.amt = Math.min(r.max, r.amt + (r.kind === "clay" ? 3 : 1));
+  dailyBeasts(w);
+  const pop = living(w).length;
+  dailyMorale(w, { housed: houseCapacity(w) >= pop, fed: foodTotal(w) >= pop * 6 });
+  // 바위는 천천히 다시 드러난다 (귀한 광맥일수록 더디게)
+  for (const r of w.rocks) r.amt = Math.min(r.max, r.amt + (r.kind === "clay" ? 3 : r.ore ? METAL_INFO[r.ore].regen : 1));
   // 쓰지 못하고 쌓이는 가죽은 버린다
   if ((w.stock.hide ?? 0) > 40) w.stock.hide = 40;
   // 음식이 상한다

@@ -15,6 +15,7 @@ import { SkyAndLight } from "./SkyAndLight";
 import { Structures } from "./Structures";
 import { TerrainMesh } from "./Terrain";
 import { Animals, FishSchool, Items, Rocks } from "./Things";
+import { Beasts } from "./Beasts";
 import { Water } from "./Water";
 import { WeatherFx } from "./WeatherFx";
 
@@ -32,6 +33,7 @@ function Scene() {
       <Structures terrain={terrain} />
       <Items terrain={terrain} />
       <Animals terrain={terrain} />
+      <Beasts terrain={terrain} />
       <FishSchool terrain={terrain} />
       <People terrain={terrain} />
       <WeatherFx terrain={terrain} />

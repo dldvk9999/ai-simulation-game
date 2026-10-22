@@ -5,14 +5,34 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Terrain } from "@/sim/terrain";
 import { TIME_SCALE } from "@/sim/constants";
-import type { AnimalKind, FishKind, Res, RockKind } from "@/sim/types";
+import { METAL_INFO } from "@/sim/data";
+import type { AnimalKind, FishKind, Metal, Res, Rock } from "@/sim/types";
 import { useRuntime, useWorldVersion } from "./context";
 import { env, follow, lerpAngle } from "./env";
 import { G, merge, part, vcMat } from "./geo";
 
 // ─── 바위 ──────────────────────────────────────────────────────────────
 
-const ROCK_GEO: Record<RockKind, THREE.BufferGeometry> = {
+/** 광맥 바위: 금속마다 박힌 결정의 빛깔이 다르다 */
+function veinGeo(m: Metal) {
+  const c = METAL_INFO[m].color;
+  const rare = m === "gold" || m === "silver" || m === "diamond";
+  const base = m === "diamond" ? "#7a7d88" : m === "gold" ? "#9a8c78" : "#958b82";
+  const bits = [];
+  for (let i = 0; i < (rare ? 7 : 5); i++) {
+    const a = i * 2.4, r = 0.28 + (i % 3) * 0.12;
+    bits.push(m === "diamond"
+      ? part(G.oct(0.15 + (i % 2) * 0.06), { color: c, pos: [Math.cos(a) * r, 0.62 + (i % 3) * 0.12, Math.sin(a) * r] })
+      : part(G.ico(0.13 + (i % 2) * 0.06, 0), { color: c, pos: [Math.cos(a) * r * 1.1, 0.55 + (i % 3) * 0.13, Math.sin(a) * r * 1.1] }));
+  }
+  return merge([
+    part(G.dodec(0.72), { color: base, scale: [1.15, 0.85, 1], pos: [0, 0.38, 0] }),
+    part(G.dodec(0.38), { color: base, pos: [0.55, 0.18, -0.25] }),
+    ...bits,
+  ]);
+}
+
+const ROCK_GEO: Record<string, THREE.BufferGeometry> = {
   rock: merge([part(G.dodec(0.55), { color: "#9b968e", scale: [1.2, 0.7, 1] , pos: [0, 0.22, 0] }), part(G.dodec(0.3), { color: "#aaa59c", pos: [0.45, 0.12, 0.2] })]),
   boulder: merge([part(G.dodec(1.0), { color: "#8c877f", scale: [1.2, 0.85, 1], pos: [0, 0.5, 0] }), part(G.dodec(0.55), { color: "#9d978e", pos: [0.8, 0.25, -0.3] })]),
   ore: merge([
@@ -30,8 +50,11 @@ const ROCK_GEO: Record<RockKind, THREE.BufferGeometry> = {
     part(G.cone(0.09, 0.4, 5), { color: "#ffffff", pos: [0.3, 0.38, -0.25], rot: [0.35, 0, -0.45] }),
     part(G.cone(0.07, 0.3, 5), { color: "#d7cdf4", pos: [-0.1, 0.33, -0.3], rot: [0.4, 0, 0.2] }),
   ]),
+  ...Object.fromEntries((Object.keys(METAL_INFO) as Metal[]).map((m) => [`vein:${m}`, veinGeo(m)])),
 };
+const rockKey = (r: Rock) => (r.kind === "vein" ? `vein:${r.ore ?? "iron"}` : r.kind);
 
+const ROCK_CAP = 140;
 const tmpM = new THREE.Matrix4();
 const tmpQ = new THREE.Quaternion();
 const tmpE = new THREE.Euler();
@@ -46,12 +69,12 @@ export function Rocks({ terrain }: { terrain: Terrain }) {
   const rebuild = () => {
     const w = rt.world;
     if (!w) return;
-    for (const kind of Object.keys(ROCK_GEO) as RockKind[]) {
+    for (const kind of Object.keys(ROCK_GEO)) {
       const mesh = refs.current[kind];
       if (!mesh) continue;
       let n = 0;
       for (const r of w.rocks) {
-        if (r.kind !== kind) continue;
+        if (rockKey(r) !== kind || n >= ROCK_CAP) continue;
         const s = r.s * (0.45 + 0.55 * Math.max(0, r.amt / r.max));
         tmpP.set(r.x, terrain.height(r.x, r.z) - 0.05, r.z);
         tmpQ.setFromEuler(tmpE.set(0, r.rot, 0));
@@ -73,13 +96,13 @@ export function Rocks({ terrain }: { terrain: Terrain }) {
   });
   return (
     <>
-      {(Object.keys(ROCK_GEO) as RockKind[]).map((k) => (
+      {Object.keys(ROCK_GEO).map((k) => (
         <instancedMesh
           key={k}
           ref={(m) => {
             refs.current[k] = m;
           }}
-          args={[ROCK_GEO[k], vcMat, 60]}
+          args={[ROCK_GEO[k], vcMat, ROCK_CAP]}
           castShadow
           receiveShadow
           frustumCulled={false}

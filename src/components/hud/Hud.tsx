@@ -5,6 +5,7 @@ import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
 import { GROUP_POP, MAX_VIEWERS } from "@/sim/constants";
 import { ERAS, TECHS } from "@/sim/data";
+import { moraleLabel } from "@/sim/morale";
 import { WEATHER_ICON, WEATHER_NAME } from "@/sim/weather";
 
 const NEED_LABEL: [string, string, string][] = [
@@ -47,6 +48,7 @@ export function Hud({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExi
           <TopBar rt={rt} amb={amb} onExit={onExit} />
           <PeopleList />
           <PersonCard />
+          <StructCard />
           <Drawer />
           <Toasts />
           <Hint />
@@ -96,6 +98,14 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
             </span>
           )}
           {s.war && <span className="chip alert">⚔️ 무리끼리 다툼</span>}
+          {s.beast && (
+            <span className="chip alert">
+              {s.beast.icon} {s.beast.name}{s.beast.count > 1 ? ` ${s.beast.count}마리` : ""} 출몰
+            </span>
+          )}
+          <span className={`chip morale ${s.morale >= 75 ? "hi" : s.morale >= 50 ? "" : s.morale >= 35 ? "low" : "bad"}`} title="사기가 높으면 일과 연구가 잘 되고, 낮으면 마음이 가라앉아요">
+            {s.morale >= 50 ? "💪" : "😞"} 사기 {s.morale} · {moraleLabel(s.morale)}
+          </span>
           <span className="chip" title={s.isHost ? "이 화면이 섬의 시간을 돌리고 있어요" : "다른 관찰자와 함께 보는 중"}>
             👁 {s.viewers}/{MAX_VIEWERS}
           </span>
@@ -306,6 +316,37 @@ function PersonCard() {
   );
 }
 
+/** 눌러 본 건물: 용도와 내구도 */
+function StructCard() {
+  const st = useHud((s) => s.structure);
+  const person = useHud((s) => s.selected);
+  if (!st || person) return null;
+  const k = st.max ? st.hp / st.max : 0;
+  return (
+    <div className="card person struct">
+      <div className="phead">
+        <span className="big">🏠</span>
+        <div>
+          <div className="pn">
+            {st.name} {st.floors > 1 && <span className="sub">{st.floors}층</span>}
+          </div>
+          <div className="sub">{st.use}{st.use && " · "}{st.state}</div>
+        </div>
+        <button className="x" onClick={() => useHud.setState({ structId: null })}>✕</button>
+      </div>
+      <div className="bars">
+        <Bar v={k * 100} color={k > 0.6 ? "#69db7c" : k > 0.3 ? "#ffd43b" : "#ff6b6b"} label="내구도" />
+      </div>
+      <div className="meta">
+        <div>🧱 {st.hp} / {st.max}</div>
+        {st.who && <div>👪 {st.who}</div>}
+        {st.note && <div>📌 {st.note}</div>}
+        <div className="tiny">빠르게 세 번 누르면 내구도가 깎여요. 0이 되면 무너져요.</div>
+      </div>
+    </div>
+  );
+}
+
 function Drawer() {
   const panel = useHud((s) => s.panel);
   if (panel === "none" || panel === "people") return panel === "people" ? <PeopleDrawer /> : null;
@@ -439,6 +480,10 @@ function Help() {
         <li>✋ <b>드래그</b> — 물건·동물·물고기를 집어 옮겨요. 사람 앞에 놓아주면 선물로 여기고 반가워해요.</li>
         <li>🔥 <b>연타</b> — 같은 자리를 빠르게 {5}번 클릭하면 불이 붙어요. 장작 위면 더 오래 타요. 비가 오면 잘 안 붙어요.</li>
         <li>👤 사람은 건드릴 수 없어요. 클릭하면 마음과 상태를 볼 수 있고, 더블클릭하면 따라가요.</li>
+        <li>🏠 건물을 누르면 용도와 내구도가 보여요. <b>빠르게 세 번</b> 누르면 내구도가 깎이고, 0이 되면 무너져요. 큰 건물일수록 튼튼하고, 무너지면 사람들의 사기가 꺾여요.</li>
+        <li>🐺 가끔 맹수가 나타나 사람을 노려요. 섬에서 오래 지낼수록 늑대 → 곰 → 호랑이 → 검치호로 강해져요. 사람들은 그 시대의 무기(창·활·청동검·철창·총)를 만들어 맞서고, 망루·성루·포대에 올라 쏘아요. 맹수를 누르면 잠깐 휘청거려요.</li>
+        <li>⛏️ 섬이 두 배로 넓어졌어요. 바깥쪽 바위 언덕의 광맥에서 철·구리·주석, 드물게 은·금·다이아몬드를 캐요. 귀한 것일수록 잘 안 나와요.</li>
+        <li>🏗️ 시대가 지날수록 용도에 맞는 건물을 설계해 더 높고 반듯하게 지어요 (연립주택 · 아파트 · 대장간 · 공장 · 망루 · 성루).</li>
         <li>🎥 빈 곳 드래그: 회전 · 우클릭/Shift 드래그: 이동 · 휠: 확대 · WASD/QE 키도 돼요.</li>
         <li>⏳ 섬의 하루는 현실 20분이에요. 창을 닫아도 섬의 시간은 계속 흘러요.</li>
         <li>🤧 춥거나 비·눈을 맞으면 감기에 걸릴 수 있어요. 1~5단계로 나빠지고, 3단계는 독감, 5단계는 요양소에서 떨어져 지내야 해요. 약초·땅속 뿌리·약돌을 찾아 약을 만들면 나아요.</li>

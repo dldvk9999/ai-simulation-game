@@ -10,10 +10,13 @@ export const YEAR = DAY * DAYS_PER_SEASON * 4;
 export const SIM_TICK_MS = 100;
 export const MAX_VIEWERS = 3;
 
-/** 지형 */
-export const WORLD_SIZE = 240;
-export const TERRAIN_RES = 257;
-export const ISLAND_RADIUS = 66;
+/** 지형: 처음 섬(CORE_RADIUS)은 그대로 두고 바깥으로 넓혀 넓이를 두 배로 만들었다 */
+export const WORLD_SIZE = 320;
+export const TERRAIN_RES = 341;
+export const CORE_RADIUS = 66;
+export const ISLAND_RADIUS = 93;
+/** 처음 섬에 견준 넓이 배율 (≈ 2) */
+export const AREA_MUL = (ISLAND_RADIUS / CORE_RADIUS) ** 2;
 export const SEA_LEVEL = 0;
 
 /** 걷기 속도(게임 초당 유닛). 현실 기준 초당 약 2.4유닛. */
@@ -29,4 +32,4 @@ export const CHRONICLE_LIMIT = 240;
 /** 오래 비워둔 섬을 따라잡을 때 허용하는 최대 게임 시간(현실 약 60일). */
 export const MAX_CATCHUP = DAY * 72 * 60;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;

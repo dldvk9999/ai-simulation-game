@@ -53,6 +53,19 @@ export interface PersonDetail extends PersonSummary {
   view: string;
 }
 
+/** 눌러 본 건물 */
+export interface StructDetail {
+  id: number;
+  name: string;
+  floors: number;
+  use: string;
+  hp: number;
+  max: number;
+  state: string;
+  who: string;
+  note: string;
+}
+
 export interface Toast {
   id: number;
   text: string;
@@ -85,6 +98,11 @@ export interface HudState {
   openGroup: number | null;
   disaster: { name: string; icon: string; coming: boolean } | null;
   war: boolean;
+  /** 사기 0..100 */
+  morale: number;
+  beast: { name: string; icon: string; count: number } | null;
+  structId: number | null;
+  structure: StructDetail | null;
   selectedId: number | null;
   followId: number | null;
   selected: PersonDetail | null;
@@ -122,6 +140,10 @@ export const useHud = create<HudState>(() => ({
   openGroup: null,
   disaster: null,
   war: false,
+  morale: 70,
+  beast: null,
+  structId: null,
+  structure: null,
   selectedId: null,
   followId: null,
   selected: null,

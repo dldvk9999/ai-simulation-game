@@ -178,7 +178,9 @@ function fromB64(b64: string) {
 }
 
 /** 소수는 셋째 자리까지만: 위치·욕구 값에는 충분하고 저장·전송 크기가 절반으로 준다 */
-export const compact = (_: string, v: unknown) => (typeof v === "number" && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v);
+const COARSE = new Set(["x", "z", "tx", "tz", "rot", "s", "g"]);
+export const compact = (k: string, v: unknown) =>
+  typeof v === "number" && !Number.isInteger(v) ? (COARSE.has(k) ? Math.round(v * 100) / 100 : Math.round(v * 1000) / 1000) : v;
 
 /** 큰 상태를 Realtime 메시지로 보내기 위해 gzip+base64 */
 export async function pack(obj: unknown): Promise<{ z?: string; j?: string }> {

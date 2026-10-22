@@ -92,4 +92,5 @@ export const G = {
   ico: (r: number, d = 0) => new THREE.IcosahedronGeometry(r, d),
   dodec: (r: number) => new THREE.DodecahedronGeometry(r, 0),
   sphere: (r: number, w = 8, h = 6) => new THREE.SphereGeometry(r, w, h),
+  oct: (r: number) => new THREE.OctahedronGeometry(r, 0),
 };

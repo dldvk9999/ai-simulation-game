@@ -1,6 +1,8 @@
 import { DAY, HOUR, TIME_SCALE } from "./constants";
 import { ageYears } from "./clock";
+import { newProject } from "./building";
 import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
+import { moraleMul, shiftMorale } from "./morale";
 import { range, rand } from "./rng";
 import type { Terrain } from "./terrain";
 import { josa, thought } from "./text";
@@ -41,7 +43,7 @@ export function researchMul(w: WorldState) {
   // 조직을 이루면 체계적으로, 문명을 세우면 더욱 빠르게 배운다
   if (w.groups?.some((g) => g.kind === "civ")) m *= w.structures.some((s) => s.type === "hall" && s.prog >= 1) ? 1.32 : 1.25;
   else if (w.groups?.length) m *= 1.1;
-  return m;
+  return m * moraleMul(w);
 }
 
 export function chooseFocus(w: WorldState) {
@@ -58,6 +60,9 @@ export function chooseFocus(w: WorldState) {
   // 겪은 재해에 맞서는 방법은 모두가 머리를 맞대고 먼저 궁리한다
   const recent = !!w.history && w.time - w.history.lastDisaster < 20 * DAY;
   const counter = recent ? ["bracing", "forecast", "seawall", "quakeproof"] : [];
+  // 맹수에게 시달린 뒤에는 무기와 망루부터
+  const hunted = !!w.history?.lastBeast && w.time - w.history.lastBeast < 30 * DAY;
+  const arms = ["bronzeweapon", "ironweapon", "firearm", "rifle", "watchtower", "fortress"];
   const prio = (id: string) => {
     let p = 1;
     if (id === "fire") p = cold ? 3 : 2.2;
@@ -73,6 +78,9 @@ export function chooseFocus(w: WorldState) {
     if (counter.includes(id)) p = 2.6;
     if (id === "net" || id === "navigation") p = 1.3;
     if (id === "shipbuilding") p = 1.4;
+    if (arms.includes(id)) p = hunted ? 2.5 : 1.3;
+    if (id === "mining") p = 1.6;
+    if ((id === "architecture" || id === "highrise") && houses < pop + 2) p = 1.4;
     return p;
   };
   av.sort((a, b) => (a.cost / prio(a.id)) - (b.cost / prio(b.id)));
@@ -110,7 +118,10 @@ export function discover(w: WorldState, p: Person | null, id: string, how?: stri
     addFx(w, "eureka", p.x, p.z, p.id);
   }
   const era = currentEra(w);
-  if (era > eraBefore) chron(w, "era", `섬의 문명이 '${ERAS[era]}'에 들어섰다.`);
+  if (era > eraBefore) {
+    chron(w, "era", `섬의 문명이 '${ERAS[era]}'에 들어섰다.`);
+    shiftMorale(w, 5);
+  }
   if (id === "electricity") for (const q of w.people) if (q.alive) q.outfit = "modern";
   bump(w);
 }
@@ -147,7 +158,7 @@ export function buildMul(w: WorldState) {
   if (knows(w, "steam")) m *= 1.3;
   if (w.groups?.some((g) => g.kind === "civ")) m *= 1.15;
   else if (w.groups?.length) m *= 1.08;
-  return m;
+  return m * moraleMul(w);
 }
 
 // ─── 집 ────────────────────────────────────────────────────────────────
@@ -233,7 +244,7 @@ export function bestHouse(w: WorldState): StructureType | null {
   return null;
 }
 
-/** 다음 건설 과제를 정한다 (한 번에 하나, 밭과 무덤은 예외) */
+/** 다음 건설 과제를 정한다 (한 번에 하나, 밭과 무덤은 예외). 용도에 맞는 건물을 그때그때 고른다 */
 export function planProject(w: WorldState, T: Terrain) {
   const active = projects(w).filter((s) => s.type !== "grave" && s.type !== "farm");
   if (active.length >= 1) return;
@@ -242,11 +253,17 @@ export function planProject(w: WorldState, T: Terrain) {
   const cap = houseCapacity(w);
   const best = bestHouse(w);
   const want: StructureType[] = [];
+  const count = (t: StructureType) => w.structures.filter((s) => s.type === t).length;
+  const hunted = (w.history?.beast ?? 0) > 0;
 
   if (best && cap < pop) want.push(best);
   // 많이 아픈 사람이 있으면 떨어져 쉴 요양소부터
   const sickest = living(w).reduce((m, p) => Math.max(m, p.ill ?? 0), 0);
   if (knows(w, "leanto") && !has(w, "infirmary") && (sickest >= 4 || (knows(w, "remedy") && pop >= 8))) want.unshift("infirmary");
+  // 맹수에게 시달렸다면 마을을 지킬 건물을
+  if (hunted && knows(w, "watchtower") && count("watchtower") < (pop >= 12 ? 2 : 1)) want.unshift("watchtower");
+  if (hunted && knows(w, "fortress") && !has(w, "fort")) want.unshift("fort");
+  if (hunted && knows(w, "firearm") && !has(w, "battery")) want.push("battery");
   if (planGroupHouse(w, T)) return;
   if (knows(w, "basket") && !has(w, "storage")) want.push("storage");
   if (knows(w, "polished") && !has(w, "workshop")) want.push("workshop");
@@ -254,39 +271,40 @@ export function planProject(w: WorldState, T: Terrain) {
   if (knows(w, "pottery") && !has(w, "kiln")) want.push("kiln");
   if (knows(w, "husbandry") && !has(w, "pen")) want.push("pen");
   if (knows(w, "well") && !has(w, "well")) want.push("well");
-  // 집 업그레이드
+  if (knows(w, "mining") && w.found.includes("vein") && !has(w, "mine")) want.push("mine");
+  // 집 업그레이드: 오래된 집을 허물고 더 높고 튼튼한 집을 짓는다
   if (best && !want.length) {
     const tierBest = STRUCTS[best].tier ?? 0;
-    const old = houses(w).find((h) => (STRUCTS[h.type].tier ?? 0) < tierBest && !w.structures.some((s) => s.replaces === h.id));
+    const old = houses(w)
+      .filter((h) => (STRUCTS[h.type].tier ?? 0) < tierBest && !w.structures.some((s) => s.replaces === h.id))
+      .sort((x, y) => (STRUCTS[x.type].tier ?? 0) - (STRUCTS[y.type].tier ?? 0))[0];
     if (old) {
       const site = findSite(w, T, best, { x: old.x, z: old.z });
       if (site) {
-        const s = makeStructure(w, best, site.x, site.z, site.rot);
-        s.replaces = old.id;
-        w.structures.push(s);
-        bump(w);
+        newProject(w, best, site).replaces = old.id;
         return;
       }
     }
   }
   if (knows(w, "metallurgy") && !has(w, "smelter")) want.push("smelter");
+  if (knows(w, "metallurgy") && !has(w, "forge")) want.push("forge");
   if (knows(w, "writing") && !has(w, "library")) want.push("library");
   if (knows(w, "boat") && !has(w, "dock")) want.push("dock");
   if (knows(w, "windmill") && !has(w, "windmill")) want.push("windmill");
   if (knows(w, "astronomy") && !has(w, "observatory")) want.push("observatory");
+  if (knows(w, "steam") && !has(w, "factory")) want.push("factory");
   if (knows(w, "electricity") && !has(w, "lighthouse")) want.push("lighthouse");
-  if (knows(w, "seawall") && w.structures.filter((s) => s.type === "seawall").length < 3) want.unshift("seawall");
+  if (knows(w, "seawall") && count("seawall") < 3) want.unshift("seawall");
   if (knows(w, "shipbuilding") && !has(w, "shipyard")) want.push("shipyard");
   if (knows(w, "portal") && !has(w, "portal")) want.push("portal");
   if (knows(w, "hut") && w.groups?.some((g) => g.kind === "civ") && !has(w, "hall")) want.push("hall");
   if (best && cap < pop + 2 && pop >= 3) want.push(best);
-  if (knows(w, "stoneaxe") && w.structures.filter((s) => s.type === "bench").length < Math.min(3, 1 + Math.floor(pop / 4))) want.push("bench");
+  if (knows(w, "stoneaxe") && count("bench") < Math.min(3, 1 + Math.floor(pop / 4))) want.push("bench");
 
   for (const t of want) {
-    const site = findSite(w, T, t);
+    const site = t === "mine" ? findSite(w, T, t, T.mine, { min: T.mine.r * 0.8, max: T.mine.r * 1.35 }) : findSite(w, T, t);
     if (site) {
-      w.structures.push(makeStructure(w, t, site.x, site.z, site.rot));
-      bump(w);
+      newProject(w, t, site);
       return;
     }
   }
@@ -303,10 +321,7 @@ function planGroupHouse(w: WorldState, T: Terrain) {
     if (cap >= ms) continue;
     const site = findSite(w, T, best, g.camp);
     if (!site) continue;
-    const s = makeStructure(w, best, site.x, site.z, site.rot);
-    s.group = g.id;
-    w.structures.push(s);
-    bump(w);
+    newProject(w, best, site).group = g.id;
     return true;
   }
   return false;
@@ -357,6 +372,13 @@ const RING: Partial<Record<StructureType, [number, number]>> = {
   infirmary: [16, 24],
   hall: [4, 9],
   portal: [10, 20],
+  watchtower: [9, 17],
+  fort: [11, 19],
+  battery: [13, 22],
+  townhouse: [6, 17],
+  apartment: [7, 19],
+  forge: [6, 12],
+  factory: [14, 26],
 };
 
 export function findSite(
@@ -366,17 +388,20 @@ export function findSite(
   if (type === "dock" || type === "lighthouse" || type === "seawall" || type === "shipyard") return coastSite(w, T, type);
   const [r0, r1] = ring ? [ring.min, ring.max] : near ? [def.radius + 3, def.radius + 9] : RING[type] ?? [5, 15];
   const cx = near?.x ?? w.camp.x, cz = near?.z ?? w.camp.z;
+  const grid = layoutGrid(w, type);
   for (let k = 0; k < 160; k++) {
     const grow = 1 + Math.floor(k / 40) * 0.4;
     const a = rand(w) * Math.PI * 2;
     const d = range(w, r0, r1 * grow);
-    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    let x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    if (grid) [x, z] = grid.snap(x, z);
     if (!T.isLand(x, z)) continue;
     if (T.height(x, z) < 0.9) continue;
-    if (T.slopeAt(x, z) > (type === "farm" ? 0.28 : 0.38)) continue;
+    if (T.slopeAt(x, z) > (type === "farm" ? 0.28 : type === "mine" ? 0.8 : 0.38)) continue;
     if (T.inPond(x, z, def.radius + 1)) continue;
     const b = T.biome(x, z);
-    if (b === "rock" && type !== "observatory") continue;
+    if (b === "rock" && type !== "observatory" && type !== "mine") continue;
+    if (b === "mine" && type !== "mine") continue;
     let blocked = false;
     for (const s of w.structures) {
       if (s.type === "raft") continue;
@@ -391,10 +416,36 @@ export function findSite(
     for (const r of w.rocks) if (dist(x, z, r.x, r.z) < def.radius + 1) blocked = true;
     if (blocked) continue;
     clearSite(w, x, z, def.radius + 0.6);
-    const rot = Math.atan2(cz - z, cx - x);
+    const rot = grid ? grid.face(x, z) : Math.atan2(cz - z, cx - x);
     return { x, z, rot };
   }
   return null;
+}
+
+/**
+ * 수학을 알면 건물이 같은 방향을 바라보게 짓고, 건축학을 알면 마을을 바둑판처럼 반듯하게 나눈다.
+ * 축은 야영지에서 바다를 바라보는 방향에 맞춘다.
+ */
+function layoutGrid(w: WorldState, type: StructureType) {
+  if (!knows(w, "mathematics") || type === "farm" || type === "grave" || type === "campfire" || type === "mine") return null;
+  const base = Math.atan2(w.camp.z, w.camp.x);
+  const ux = Math.cos(base), uz = Math.sin(base);
+  const step = 3.6;
+  const squared = knows(w, "architecture");
+  return {
+    snap(x: number, z: number): [number, number] {
+      if (!squared) return [x, z];
+      const dx = x - w.camp.x, dz = z - w.camp.z;
+      const u = Math.round((dx * ux + dz * uz) / step) * step;
+      const v = Math.round((-dx * uz + dz * ux) / step) * step;
+      return [w.camp.x + u * ux - v * uz, w.camp.z + u * uz + v * ux];
+    },
+    /** 마을 가운데를 향하는 네 방향 가운데 하나 */
+    face(x: number, z: number) {
+      const a = Math.atan2(w.camp.z - z, w.camp.x - x) - base;
+      return base + Math.round(a / (Math.PI / 2)) * (Math.PI / 2);
+    },
+  };
 }
 
 function clearSite(w: WorldState, x: number, z: number, r: number) {
@@ -447,6 +498,7 @@ export function completeStructure(w: WorldState, s: Structure, by: Person | null
   }
   addFx(w, "complete", s.x, s.z, s.id);
   if (isHouse(s.type)) assignHomes(w);
+  if (s.type !== "grave" && s.type !== "farm") shiftMorale(w, STRUCTS[s.type].hp >= 300 ? 3 : 1);
   bump(w);
 }
 

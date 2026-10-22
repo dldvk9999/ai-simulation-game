@@ -1,5 +1,7 @@
 // 화면 클릭 → 월드의 무엇을 눌렀는지. 렌더링 메시가 아니라 시뮬레이션 상태로 판정한다.
 import * as THREE from "three";
+import { growthOf } from "@/sim/beasts";
+import { heightOf } from "@/sim/building";
 import { ageYears } from "@/sim/clock";
 import { STRUCTS } from "@/sim/data";
 import { isTree } from "@/sim/ecology";
@@ -80,6 +82,12 @@ export function pickWorld(w: WorldState, T: Terrain, ray: THREE.Ray, opts: { dra
     consider("animal", a.id, a.x, a.z, rayCapsule(o, d, a.x, y, y + (a.kind === "crab" ? 0.25 : 0.7), a.z, r));
   }
   for (const f of w.fish) consider("fish", f.id, f.x, f.z, rayCapsule(o, d, f.x, -0.6, 0.2, f.z, f.kind === "bigfish" ? 0.8 : 0.6));
+  for (const b of w.beasts) {
+    if (b.st === "dead" || opts.draggableOnly) continue;
+    const y = H(b.x, b.z);
+    const s = (b.kind === "wolf" ? 0.8 : 1.15) * (0.85 + 0.45 * growthOf(b));
+    consider("beast", b.id, b.x, b.z, rayCapsule(o, d, b.x, y, y + 1.2 * s, b.z, 0.85 * s));
+  }
   if (!opts.draggableOnly) {
     for (const p of w.people) {
       const y = H(p.x, p.z);
@@ -109,7 +117,7 @@ export function pickWorld(w: WorldState, T: Terrain, ray: THREE.Ray, opts: { dra
       if (s.type === "farm" || s.type === "pen") continue;
       const y = H(s.x, s.z);
       const r = STRUCTS[s.type].radius;
-      consider("structure", s.id, s.x, s.z, rayCapsule(o, d, s.x, y, y + (s.type === "campfire" ? 0.4 : s.type === "lighthouse" ? 8 : 2), s.z, s.type === "campfire" ? 0.8 : r * 0.85));
+      consider("structure", s.id, s.x, s.z, rayCapsule(o, d, s.x, y, y + Math.max(0.4, heightOf(s) * (s.prog >= 1 ? 1 : 0.3 + 0.7 * s.prog)), s.z, s.type === "campfire" ? 0.8 : r * 0.85));
     }
   }
   const g = groundHit(T, o, d);

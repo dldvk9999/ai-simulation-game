@@ -904,3 +904,11 @@ button {
   .hint-wrap { max-width: calc(100vw - 28px); bottom: 18px; }
   .status { min-width: 0; }
 }
+
+/* ─── 사기 · 맹수 · 건물 ─── */
+.chip.morale.hi { background: rgba(105, 219, 124, 0.25); }
+.chip.morale.low { background: rgba(255, 212, 59, 0.3); }
+.chip.morale.bad { background: rgba(255, 107, 107, 0.32); }
+.card.struct .big { font-size: 26px; }
+.chron .k-beast,
+.toast.k-beast { color: #c2410c; }

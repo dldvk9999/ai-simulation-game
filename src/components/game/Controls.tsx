@@ -1,10 +1,11 @@
 "use client";
-// 마우스 조작: 클릭 = 치기, 드래그 = 옮기기, 연타 = 불 지피기. 빈 곳 드래그 = 시점 회전.
+// 마우스 조작: 클릭 = 치기, 드래그 = 옮기기, 연타 = 불 지피기, 건물 세 번 연달아 = 부수기. 빈 곳 드래그 = 시점 회전.
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useHud } from "@/game/hud";
 import { groundHit, Pick, pickWorld } from "@/game/picking";
+import { STRUCTS } from "@/sim/data";
 import { RAPID_CLICKS } from "@/sim/interactions";
 import type { Terrain } from "@/sim/terrain";
 import { findById } from "@/sim/world";
@@ -55,6 +56,8 @@ export function Controls({ terrain }: { terrain: Terrain }) {
     const clicks: { t: number; x: number; z: number }[] = [];
     let lastHover = 0;
     let lastPersonTap = { id: -1, t: 0 };
+    // 같은 건물을 빠르게 세 번 누르면 내구도가 깎인다
+    const taps = { id: -1, n: 0, t: 0 };
 
     const gestureOf = () => {
       const [a, b] = [...pointers.values()];
@@ -124,7 +127,7 @@ export function Controls({ terrain }: { terrain: Terrain }) {
       if (pointers.size >= 2) {
         if (gesture && pointers.size === 2) {
           const g = gestureOf();
-          if (gesture.d > 10 && g.d > 10) camState.dist = THREE.MathUtils.clamp(camState.dist * (gesture.d / g.d), 7, 170);
+          if (gesture.d > 10 && g.d > 10) camState.dist = THREE.MathUtils.clamp(camState.dist * (gesture.d / g.d), 7, 230);
           panBy(g.mx - gesture.mx, g.my - gesture.my, true);
           gesture = g;
         }
@@ -190,12 +193,31 @@ export function Controls({ terrain }: { terrain: Terrain }) {
         const now = performance.now();
         const twice = lastPersonTap.id === p.id && now - lastPersonTap.t < 420;
         lastPersonTap = { id: p.id ?? -1, t: now };
-        useHud.setState({ selectedId: p.id ?? null, followId: twice ? p.id ?? null : hud.followId === p.id ? p.id : hud.followId });
+        useHud.setState({ selectedId: p.id ?? null, structId: null, followId: twice ? p.id ?? null : hud.followId === p.id ? p.id : hud.followId });
         if (!hud.hint) useHud.setState({ hint: "사람은 건드릴 수 없어요. 대신 주변 환경을 바꿔 도와줄 수 있어요." });
         return;
       }
       rt.interact({ kind: "hit", target: { k: p.k, id: p.id }, x: p.x, z: p.z });
       rt.localFx.push({ type: "click", x: p.x, z: p.z });
+      const st = p.k === "structure" ? findById(rt.world.structures, p.id) : undefined;
+      useHud.setState(st ? { structId: st.id, selectedId: null } : { structId: null });
+      if (st && st.type !== "campfire") {
+        const now = performance.now();
+        taps.n = taps.id === st.id && now - taps.t < 650 ? taps.n + 1 : 1;
+        taps.id = st.id;
+        taps.t = now;
+        const name = STRUCTS[st.type].name;
+        if (st.type === "raft" || st.type === "grave") return;
+        if (taps.n === 2) useHud.setState({ hint: `🔨 한 번 더 두드리면 ${name}에 금이 가요` });
+        if (taps.n >= 3) {
+          taps.n = 0;
+          rt.interact({ kind: "smash", target: { k: "structure", id: st.id }, x: st.x, z: st.z });
+          rt.localFx.push({ type: "crack", x: st.x, z: st.z });
+          useHud.setState({ hint: `💥 쾅! ${name}의 내구도가 깎였어요` });
+        }
+        return;
+      }
+      if (p.k === "beast") useHud.setState({ hint: "💫 맹수가 휘청거려요! 사람들이 맞설 틈이 생겼어요." });
       // 연타 → 불 지피기
       const now = performance.now();
       while (clicks.length && now - clicks[0].t > RAPID_WINDOW) clicks.shift();
@@ -203,7 +225,7 @@ export function Controls({ terrain }: { terrain: Terrain }) {
       if (near.length !== clicks.length) clicks.length = 0;
       clicks.push({ t: now, x: p.x, z: p.z });
       const n = clicks.length;
-      const flammable = p.k === "ground" || p.k === "item" || p.k === "structure";
+      const flammable = p.k === "ground" || p.k === "item" || (p.k === "structure" && st?.type === "campfire");
       if (n >= 2 && flammable) {
         rt.localFx.push({ type: "spark", x: p.x, z: p.z });
         useHud.setState({ hint: `불씨가 일어나고 있어요… ${"●".repeat(n)}${"○".repeat(Math.max(0, RAPID_CLICKS - n))}` });
@@ -229,7 +251,7 @@ export function Controls({ terrain }: { terrain: Terrain }) {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      camState.dist = THREE.MathUtils.clamp(camState.dist * Math.exp(e.deltaY * 0.0012), 7, 170);
+      camState.dist = THREE.MathUtils.clamp(camState.dist * Math.exp(e.deltaY * 0.0012), 7, 230);
     };
     const onCtx = (e: Event) => e.preventDefault();
     const onKey = (e: KeyboardEvent) => {
@@ -293,7 +315,7 @@ export function Controls({ terrain }: { terrain: Terrain }) {
         camState.tz += (p.z - camState.tz) * (1 - Math.exp(-dt * 3));
       }
     }
-    const lim = 110;
+    const lim = 150;
     camState.tx = THREE.MathUtils.clamp(camState.tx, -lim, lim);
     camState.tz = THREE.MathUtils.clamp(camState.tz, -lim, lim);
     camState.ty = Math.max(0, terrain.height(camState.tx, camState.tz)) + 1.2;

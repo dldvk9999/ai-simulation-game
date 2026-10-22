@@ -85,7 +85,7 @@ function buildGeos() {
 
 const KINDS: (PlantKind | "stump")[] = ["tree", "fruit", "pine", "palm", "bush", "fiber", "herb", "crop", "stump"];
 // 동식물이 예전보다 1.7배 많아져서 넉넉하게
-const MAX: Record<string, number> = { tree: 380, fruit: 140, pine: 210, palm: 155, bush: 240, fiber: 240, herb: 90, crop: 64, stump: 280 };
+const MAX: Record<string, number> = { tree: 760, fruit: 280, pine: 420, palm: 310, bush: 480, fiber: 480, herb: 180, crop: 64, stump: 560 };
 
 // 계절별 잎 색 (봄, 여름, 가을, 겨울)
 const TINTS: Record<string, [THREE.Color, THREE.Color][]> = {
@@ -209,15 +209,15 @@ export function Flora({ terrain }: { terrain: Terrain }) {
       const a = p.rot + i * 2.1;
       const cx = Math.cos(p.rot) * 0.9 * p.s, cz = -Math.sin(p.rot) * 0.9 * p.s;
       o.set(p.x + cx + Math.cos(a) * 0.25, terrain.height(p.x, p.z) + 3.75 * p.s, p.z + cz + Math.sin(a) * 0.25);
-    }, 260);
+    }, 520);
     fill(fruitMesh.current, ["fruit"], (p, i, o) => {
       const a = p.rot + i * 1.7;
       o.set(p.x + Math.cos(a) * 1.05 * p.s, terrain.height(p.x, p.z) + (2.0 + (i % 2) * 0.5) * p.s, p.z + Math.sin(a) * 1.05 * p.s);
-    }, 280);
+    }, 560);
     fill(berryMesh.current, ["bush"], (p, i, o) => {
       const a = p.rot + i * 1.1;
       o.set(p.x + Math.cos(a) * 0.55 * p.s, terrain.height(p.x, p.z) + (0.45 + (i % 3) * 0.12) * p.s, p.z + Math.sin(a) * 0.55 * p.s);
-    }, 850);
+    }, 1700);
   };
 
   useEffect(() => {
@@ -271,15 +271,15 @@ export function Flora({ terrain }: { terrain: Terrain }) {
           frustumCulled={false}
         />
       ))}
-      <instancedMesh ref={cocoMesh} args={[undefined, undefined, 260]} castShadow frustumCulled={false}>
+      <instancedMesh ref={cocoMesh} args={[undefined, undefined, 520]} castShadow frustumCulled={false}>
         <icosahedronGeometry args={[0.17, 0]} />
         <meshStandardMaterial color="#7a5230" flatShading roughness={0.8} />
       </instancedMesh>
-      <instancedMesh ref={fruitMesh} args={[undefined, undefined, 280]} frustumCulled={false}>
+      <instancedMesh ref={fruitMesh} args={[undefined, undefined, 560]} frustumCulled={false}>
         <icosahedronGeometry args={[0.15, 0]} />
         <meshStandardMaterial color="#e2453a" flatShading roughness={0.6} />
       </instancedMesh>
-      <instancedMesh ref={berryMesh} args={[undefined, undefined, 850]} frustumCulled={false}>
+      <instancedMesh ref={berryMesh} args={[undefined, undefined, 1700]} frustumCulled={false}>
         <icosahedronGeometry args={[0.08, 0]} />
         <meshStandardMaterial color="#c2265a" flatShading roughness={0.5} />
       </instancedMesh>
@@ -312,7 +312,7 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
       let c = 0;
       const col = new THREE.Color();
       for (let k = 0; k < n * 6 && c < n; k++) {
-        const x = range(r, -85, 85), z = range(r, -85, 85);
+        const x = range(r, -120, 120), z = range(r, -120, 120);
         const b = terrain.biome(x, z);
         if (!ok(b, x, z)) continue;
         tmpP.set(x, terrain.height(x, z) - 0.02, z);
@@ -327,8 +327,8 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       mesh.computeBoundingSphere();
     };
-    place(grassRef.current, 4400, (b) => b === "grass" || b === "forest");
-    place(flowerRef.current, 880, (b) => b === "grass", ["#ffffff", "#ffe066", "#ff9ec7", "#c7a4ff", "#ffb36b"]);
+    place(grassRef.current, 8800, (b) => b === "grass" || b === "forest");
+    place(flowerRef.current, 1760, (b) => b === "grass", ["#ffffff", "#ffe066", "#ff9ec7", "#c7a4ff", "#ffb36b"]);
   }, [terrain]);
 
   useFrame(() => {
@@ -339,8 +339,8 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
 
   return (
     <>
-      <instancedMesh ref={grassRef} args={[grassGeo, mat.mat, 4400]} receiveShadow frustumCulled={false} />
-      <instancedMesh ref={flowerRef} args={[flowerGeo, undefined, 880]} frustumCulled={false}>
+      <instancedMesh ref={grassRef} args={[grassGeo, mat.mat, 8800]} receiveShadow frustumCulled={false} />
+      <instancedMesh ref={flowerRef} args={[flowerGeo, undefined, 1760]} frustumCulled={false}>
         <meshStandardMaterial vertexColors flatShading roughness={0.7} />
       </instancedMesh>
     </>

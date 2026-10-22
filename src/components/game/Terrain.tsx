@@ -17,6 +17,8 @@ const C = {
   rock: new THREE.Color("#928d86"),
   rock2: new THREE.Color("#aaa49b"),
   pond: new THREE.Color("#5f7f5a"),
+  mine: new THREE.Color("#a07b5c"),
+  mine2: new THREE.Color("#7d736b"),
 };
 
 export function buildTerrainGeometry(T: TerrainData) {
@@ -40,6 +42,7 @@ export function buildTerrainGeometry(T: TerrainData) {
       else if (h < -0.4) tmp.copy(C.deepSand);
       else if (h < 0.3) tmp.copy(C.wetSand).lerp(C.sand, (h + 0.4) / 0.7);
       else if (b === "beach") tmp.copy(C.sand).lerp(C.grass, Math.max(0, (h - 1.0) / 0.35) * 0.5);
+      else if (b === "mine") tmp.copy(C.mine).lerp(C.mine2, v);
       else if (b === "rock") tmp.copy(C.rock).lerp(C.rock2, v);
       else if (b === "forest") tmp.copy(C.forest).lerp(C.grass2, v * 0.5);
       else if (h > 7) tmp.copy(C.high).lerp(C.rock2, Math.min(1, (h - 7) / 5) * 0.6);

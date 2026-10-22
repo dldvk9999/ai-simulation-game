@@ -1,7 +1,12 @@
 // 규칙 기반 Utility AI: 욕구·감정·성격·마을 상황을 점수로 바꿔 가장 높은 행동을 고른다.
 import { DAY, HOUR, MIN, WALK_SPEED } from "./constants";
 import { seasonOf } from "./clock";
-import { FISH_INFO, FOOD, RECIPES, Recipe, RES_NAME, STRUCTS, TECH_BY_ID } from "./data";
+import {
+  active, BEAST_INFO, pickWeapon, safeFromBeast, shelterOk, strike, STRIKE_EVERY, teamPower, threatFor, TOWER, towerRange, weaponOf,
+} from "./beasts";
+import { finishDesign } from "./building";
+import { FISH_INFO, FOOD, LUCKY, METAL_INFO, RECIPES, Recipe, RES_NAME, STRUCTS, TECH_BY_ID } from "./data";
+import { shiftMorale } from "./morale";
 import { countermeasure, damaged, floodPeak, repairCost, tsunamiThreat } from "./disaster";
 import { discoverIngredient, giveMed, illOf, infect, infirmary, isolated, medForP } from "./disease";
 import { isTree } from "./ecology";
@@ -15,7 +20,7 @@ import {
 } from "./settlement";
 import { campOf, easeWar, enemies, socialize, warOf } from "./society";
 import { josa } from "./text";
-import type { Act, ActKind, Anim, Animal, Person, Plant, Res, Role, Stock, Structure, WorldState } from "./types";
+import type { Act, ActKind, Anim, Animal, Beast, Metal, Person, Plant, Res, Role, Stock, Structure, WorldState } from "./types";
 import { boardPoint, voyageOf } from "./voyage";
 import {
   addFx, addStock, bump, chron, dist, findById, hasStock, knows, living, makePlant, makeStructure, nearest, onIsland,
@@ -49,20 +54,20 @@ const ROLE_TAGS: Record<Role, string[]> = {
   leader: ["council", "chat", "think"],
   farmer: ["farm", "tame"],
   fisher: ["fish"],
-  hunter: ["hunt", "catch"],
-  builder: ["build", "repair", "gather:wood", "gather:stone"],
-  scholar: ["think"],
-  crafter: ["craft"],
+  hunter: ["hunt", "catch", "defend"],
+  builder: ["build", "repair", "design", "gather:wood", "gather:stone"],
+  scholar: ["think", "design"],
+  crafter: ["craft", "gather:iron", "gather:copper", "gather:tin"],
   healer: ["nurse", "dig", "gather:herb", "craft:herbal", "craft:remedy", "craft:medicine"],
   cook: ["cook", "tend", "makefire"],
   sailor: ["fish", "board"],
-  guard: ["fight"],
+  guard: ["fight", "defend"],
 };
 const roleBoost = (p: Person, tag: string) =>
   p.role && ROLE_TAGS[p.role].some((t) => tag === t || tag.startsWith(t + ":")) ? 0.22 : 0;
 
 /** 많이 아플 때 할 수 있는 일 */
-const SICK_OK = new Set(["eat", "drink", "sleep", "rest", "isolate", "medicate", "deposit", "shelter", "warm", "evacuate"]);
+const SICK_OK = new Set(["eat", "drink", "sleep", "rest", "isolate", "medicate", "deposit", "shelter", "warm", "evacuate", "hide"]);
 
 /** 이 사람의 터에 있는 모닥불 (갈라져 나간 무리는 자기 불) */
 function fireFor(w: WorldState, ctx: Ctx, p: Person) {
@@ -85,7 +90,7 @@ function wearTool(w: WorldState, p: Person, tool: Res) {
 }
 
 const SOFT: ActKind[] = ["idle", "wander", "leisure", "think", "explore", "play", "follow", "chat", "warm", "mourn"];
-const NEED_ACTS: ActKind[] = ["eat", "drink", "sleep", "warm", "shelter", "forage", "collect", "unconscious", "makefire"];
+const NEED_ACTS: ActKind[] = ["eat", "drink", "sleep", "warm", "shelter", "forage", "collect", "unconscious", "makefire", "hide", "defend"];
 
 function abort(p: Person) {
   p.act = null;
@@ -229,6 +234,23 @@ function track(w: WorldState, p: Person, a: Act) {
       return false;
     }
   }
+  if (a.ph === 0 && a.k === "defend" && a.tid != null) {
+    const b = findById(w.beasts, a.tid);
+    if (!b || !active(b) || w.time - a.started > 2 * HOUR) {
+      abort(p);
+      return false;
+    }
+    if (a.sub !== "tower") {
+      const r = weaponOf(a.sub).range;
+      if (dist(p.x, p.z, b.x, b.z) <= r) {
+        arrive(w, null, p, a);
+        return false;
+      }
+      const st = standoff(p, b, r);
+      a.tx = st.x;
+      a.tz = st.z;
+    }
+  }
   if (a.ph === 0 && a.k === "collect" && a.tid != null) {
     const it = findById(w.items, a.tid);
     if (!it || it.held) {
@@ -249,7 +271,7 @@ function animFor(a: Act): Anim {
     case "drink": return "drink";
     case "forage": case "collect": case "tend": case "tame": return "pick";
     case "gather":
-      return a.res === "wood" ? "chop" : a.res === "stone" || a.res === "ore" ? "knap" : a.res === "clay" ? "dig" : "pick";
+      return a.res === "wood" ? "chop" : a.res && METAL_INFO[a.res as Metal] ? "mine" : a.res === "stone" || a.res === "ore" ? "knap" : a.res === "clay" ? "dig" : "pick";
     case "craft": return "knap";
     case "makefire": return "knap";
     case "build": return "hammer";
@@ -274,6 +296,9 @@ function animFor(a: Act): Anim {
     case "fight": return "fight";
     case "board": return "wave";
     case "evacuate": return "cower";
+    case "defend": return a.sub === "tower" || weaponOf(a.sub).range > 3 ? "aim" : "slash";
+    case "hide": return "cower";
+    case "design": return "think";
     default: return "idle";
   }
 }
@@ -311,6 +336,9 @@ function start(w: WorldState, ctx: Ctx, p: Person, a: Act | null) {
     case "repair": say(w, p, "repair", {}, "🔨"); break;
     case "fight": say(w, p, "fight", {}, "💢"); break;
     case "evacuate": say(w, p, "tsunami", {}, "🌊", true); break;
+    case "defend": say(w, p, "defend", {}, a.sub === "tower" ? "🏹" : "⚔️", true); break;
+    case "hide": say(w, p, "hide", {}, "🫣", true); break;
+    case "design": say(w, p, "design", {}, "📐"); break;
     case "mourn": {
       const dead = findById(w.people, p.grief?.id);
       if (dead) say(w, p, "mourn", {}, "🕯️");
@@ -400,6 +428,22 @@ function arrive(w: WorldState, ctx: Ctx | null, p: Person, a: Act) {
       const q = findById(w.people, a.tid);
       if (!q || !illOf(q)) return abort(p);
       p.rot = Math.atan2(q.z - p.z, q.x - p.x);
+      break;
+    }
+    case "defend": {
+      const b = findById(w.beasts, a.tid);
+      if (!b || !active(b)) return abort(p);
+      if (a.sub === "tower") {
+        const t = findById(w.structures, a.n);
+        if (!t || t.prog < 1 || (t.dmg ?? 0) >= 0.6) return abort(p);
+      }
+      p.rot = Math.atan2(b.z - p.z, b.x - p.x);
+      break;
+    }
+    case "design": {
+      const st = findById(w.structures, a.tid);
+      if (!st || st.plan !== 0) return abort(p);
+      p.rot = Math.atan2(st.z - p.z, st.x - p.x);
       break;
     }
     case "fight": {
@@ -496,6 +540,45 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
     case "shelter":
       if (ctx.weather !== "storm" && ctx.weather !== "snow" && a.t > 10 * MIN) a.t = Math.min(a.t, 10 * MIN);
       break;
+    case "hide":
+      // 맹수가 물러갈 때까지
+      if (!threatFor(w, p)) a.t = Math.min(a.t, 2 * MIN);
+      n.energy = Math.min(100, n.energy + h * 3);
+      break;
+    case "design": {
+      const st = findById(w.structures, a.tid);
+      if (!st || st.plan !== 0) a.t = 0;
+      else addResearch(w, p, h * 25 * skill(p, "think"), st.lv && st.lv > 1 ? "architecture" : "mathematics");
+      break;
+    }
+    case "defend": {
+      const b = findById(w.beasts, a.tid);
+      if (!b || !active(b)) {
+        a.t = 0;
+        break;
+      }
+      const tower = a.sub === "tower" ? findById(w.structures, a.n) : undefined;
+      if (a.sub === "tower" && (!tower || (tower.dmg ?? 0) >= 0.6)) {
+        a.t = 0;
+        break;
+      }
+      const reach = tower ? towerRange(tower) : weaponOf(a.sub).range + 0.6;
+      const d = dist(tower?.x ?? p.x, tower?.z ?? p.z, b.x, b.z);
+      if (!tower && d > reach + 0.8) {
+        // 다시 다가간다
+        a.ph = 0;
+        break;
+      }
+      if (d > reach) break;
+      p.rot = Math.atan2(b.z - p.z, b.x - p.x);
+      p.seen.atk = (p.seen.atk ?? 0) + dt;
+      while (p.seen.atk >= STRIKE_EVERY && active(b)) {
+        p.seen.atk -= STRIKE_EVERY;
+        strike(w, ctx.T, p, b, a);
+      }
+      if (!active(b)) a.t = 0;
+      break;
+    }
     case "build": {
       const s = findById(w.structures, a.tid);
       if (!s || s.prog >= 1) {
@@ -717,6 +800,17 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
     case "dig": return finishDig(w, ctx, p, a);
     case "council": return finishCouncil(w, p);
     case "fight": return finishFight(w, p, a);
+    case "design": {
+      const st = findById(w.structures, a.tid);
+      if (st && st.plan === 0) {
+        finishDesign(w, st, p);
+        practice(p, "build");
+        practice(p, "think");
+        feel(w, p, "joy", 0.25);
+        say(w, p, "designDone", { name: STRUCTS[st.type].name }, "📐", true);
+      }
+      break;
+    }
   }
   if (p.act === a) abort(p);
 }
@@ -808,7 +902,12 @@ function finishFight(w: WorldState, p: Person, a: Act) {
 
 function carryHome(w: WorldState, ctx: Ctx, p: Person, a: Act, res: Res, qty: number) {
   p.carry = { res, qty };
-  const s = spot(p, ctx.storage.x, ctx.storage.z, 0.9);
+  let to = ctx.storage;
+  if (a.k === "gather" && a.res && METAL_INFO[a.res as Metal]) {
+    const mine = w.structures.find((x) => x.type === "mine" && x.prog >= 1 && (x.dmg ?? 0) < 0.6);
+    if (mine && dist(p.x, p.z, mine.x, mine.z) < dist(p.x, p.z, to.x, to.z)) to = { x: mine.x + 1.6, z: mine.z };
+  }
+  const s = spot(p, to.x, to.z, 0.9);
   a.ph = 2;
   a.tx = s.x;
   a.tz = s.z;
@@ -861,7 +960,7 @@ function eat(w: WorldState, p: Person) {
 
 // ─── 채집 ──────────────────────────────────────────────────────────────
 
-const GATHER_RES: Res[] = ["stick", "wood", "stone", "fiber", "clay", "ore", "herb", "mineral"];
+const GATHER_RES: Res[] = ["stick", "wood", "stone", "fiber", "clay", "ore", "herb", "mineral", "iron", "copper", "tin", "silver", "gold", "diamond"];
 
 function gatherTarget(w: WorldState, p: Person, res: Res) {
   const R = 45;
@@ -906,6 +1005,12 @@ function gatherTarget(w: WorldState, p: Person, res: Res) {
       return r ? { rock: r } : null;
     }
   }
+  if (METAL_INFO[res as Metal]) {
+    // 곡괭이가 있어야 광맥을 캔다
+    if (!knows(w, "mining") || stockOf(w, "pickaxe") < 1) return null;
+    const r = nearest(w.rocks, p.x, p.z, (q) => q.kind === "vein" && q.ore === res && q.amt >= 1, 400);
+    return r ? { rock: r } : null;
+  }
   return null;
 }
 
@@ -924,6 +1029,7 @@ function planGather(w: WorldState, p: Person, res: Res): Act | null {
   if (res === "fiber" || res === "herb") t = 8 * MIN;
   if (res === "clay") t = 15 * MIN;
   if (res === "ore" || res === "mineral") t = 24 * MIN;
+  if (METAL_INFO[res as Metal]) t = (METAL_INFO[res as Metal].veins <= 2 ? 34 : 24) * MIN;
   t /= toolMul(w) * skill(p, "gather");
   return act(w, "gather", e.x + Math.cos(ang) * off, e.z + Math.sin(ang) * off, t, { tid: e.id, res });
 }
@@ -964,6 +1070,8 @@ function finishGather(w: WorldState, ctx: Ctx, p: Person, a: Act) {
       addResearch(w, p, 3, "remedy");
       addResearch(w, p, 3, "medicine");
     }
+  } else if (rk && rk.kind === "vein" && rk.ore && rk.amt >= 1) {
+    return finishMine(w, ctx, p, a, rk);
   } else if (rk && rk.amt >= 1) {
     const y = res === "stone" ? int(w, 2, 3) : res === "clay" ? 3 : 2;
     qty = Math.min(cap, y, Math.floor(rk.amt));
@@ -983,6 +1091,56 @@ function finishGather(w: WorldState, ctx: Ctx, p: Person, a: Act) {
   practice(p, "gather");
   if (qty > 0) return carryHome(w, ctx, p, a, res, qty);
   abort(p);
+}
+
+/** 광맥을 캔다: 흔한 금속은 잘 나오고, 귀한 것일수록 드물게 섞여 나온다 */
+function finishMine(w: WorldState, ctx: Ctx, p: Person, a: Act, rk: { id: number; x: number; z: number; amt: number; ore?: Metal }) {
+  const ore = rk.ore!;
+  const n = Math.min(carryCap(w), 3, Math.floor(rk.amt));
+  rk.amt -= n;
+  addFx(w, "chip", rk.x, rk.z, rk.id);
+  wearTool(w, p, "pickaxe");
+  let main = 0, stone = 0;
+  for (let i = 0; i < n; i++) {
+    if (chance(w, METAL_INFO[ore].purity)) main++;
+    else stone++;
+    for (const [m, pr] of Object.entries(LUCKY) as [Metal, number][]) {
+      if (m === ore || !chance(w, pr)) continue;
+      addStock(w, m, 1);
+      foundMetal(w, p, m);
+    }
+  }
+  if (main) foundMetal(w, p, ore);
+  practice(p, "gather");
+  addResearch(w, p, 3, "mining");
+  addResearch(w, p, 3, ore === "iron" ? "iron" : "metallurgy");
+  addResearch(w, p, 2, ore === "iron" ? "ironweapon" : "bronzeweapon");
+  if (main) return carryHome(w, ctx, p, a, ore, main);
+  if (stone) return carryHome(w, ctx, p, a, "stone", stone);
+  abort(p);
+}
+
+const SHINY = new Set<Metal>(["silver", "gold", "diamond"]);
+
+function foundMetal(w: WorldState, p: Person, m: Metal) {
+  const name = METAL_INFO[m].name;
+  if (SHINY.has(m)) {
+    feel(w, p, "joy", m === "diamond" ? 0.7 : 0.4);
+    feel(w, p, "surprise", 0.4);
+    say(w, p, "shiny", { what: name }, m === "diamond" ? "💎" : "✨", true);
+  }
+  if (w.found.includes(m)) {
+    if (m === "diamond" || m === "gold") shiftMorale(w, m === "diamond" ? 3 : 1);
+    return;
+  }
+  w.found.push(m);
+  addFx(w, "eureka", p.x, p.z, p.id);
+  shiftMorale(w, m === "diamond" ? 8 : m === "gold" ? 5 : m === "silver" ? 3 : 1);
+  chron(w, "discover", m === "diamond"
+    ? `${josa(p.name, "이/가")} 광맥 깊은 곳에서 눈부시게 반짝이는 다이아몬드를 캐냈다! 모두가 몰려와 구경했다.`
+    : m === "gold"
+    ? `${josa(p.name, "이/가")} 광맥에서 노랗게 빛나는 금을 캐냈다!`
+    : `${josa(p.name, "이/가")} 광맥에서 처음으로 ${josa(name, "을/를")} 캐냈다.`);
 }
 
 // ─── 제작 ──────────────────────────────────────────────────────────────
@@ -1009,7 +1167,18 @@ export function wantedRecipes(w: WorldState, ctx: Ctx): Recipe[] {
     herbal: 1 + sick,
     remedy: 2 + Math.floor(ctx.pop / 6) + sick,
     medicine: 2 + Math.floor(ctx.pop / 8),
+    pickaxe: 1 + Math.floor(adults / 4),
+    bronze: (ctx.need.metal ?? 0) + 3,
+    ironbar: (ctx.need.metal ?? 0) + 3,
+    jewel_s: 2 + Math.floor(ctx.pop / 6),
+    jewel_g: 2 + Math.floor(ctx.pop / 6),
   };
+  // 맹수를 겪고 나면 그 시대의 가장 좋은 무기를 싸울 사람 수만큼
+  const fighters = (w.history.beast ?? 0) > 0 ? Math.max(2, Math.ceil(adults / 2.5)) : 0;
+  want.sword = knows(w, "ironweapon") ? 0 : fighters;
+  want.ironsword = knows(w, "firearm") ? Math.ceil(fighters / 2) : fighters;
+  want.musket = knows(w, "rifle") ? 0 : fighters;
+  want.rifle = fighters;
   const out: Recipe[] = [];
   for (const r of RECIPES) {
     if (!knows(w, r.tech)) continue;
@@ -1050,6 +1219,11 @@ function finishCraft(w: WorldState, p: Person, a: Act) {
     }
   } else {
     addStock(w, r.out, r.qty);
+    if (r.out === "jewelry") {
+      // 반짝이는 장신구는 모두의 마음을 든든하게 한다
+      shiftMorale(w, 1.5);
+      feel(w, p, "joy", 0.3);
+    }
   }
   practice(p, "craft");
   addResearch(w, p, 4, "polished");
@@ -1341,6 +1515,11 @@ function materialWants(w: WorldState, ctx: Ctx): Stock {
   if (knows(w, "metallurgy")) want.ore = 6;
   if (knows(w, "herbs")) want.herb = 4 + sickCount(w, ctx) * 2;
   if (knows(w, "medicine")) want.mineral = 3;
+  if (knows(w, "mining") && stockOf(w, "pickaxe") >= 1) {
+    want.iron = Math.max(want.iron ?? 0, knows(w, "iron") ? 6 : 2);
+    want.copper = Math.max(want.copper ?? 0, knows(w, "metallurgy") ? 4 : 1);
+    want.tin = Math.max(want.tin ?? 0, knows(w, "metallurgy") ? 2 : 0);
+  }
   for (const [r, n] of Object.entries(ctx.need) as [Res, number][]) want[r] = (want[r] ?? 0) + n;
   for (const rc of recipesFor(w, ctx)) {
     for (const [r, n] of Object.entries(rc.cost) as [Res, number][]) want[r] = Math.max(want[r] ?? 0, n + (r === "stone" ? 2 : 0));
@@ -1487,6 +1666,44 @@ function foragePlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
   return act(w, "forage", sp.x, sp.z, range(w, 15, 25) * MIN, { sub: "shell" });
 }
 
+/** 맹수와 사이를 두고 설 자리: 무기가 닿는 거리 */
+function standoff(p: Person, b: Beast, r: number) {
+  const a = Math.atan2(p.z - b.z, p.x - b.x);
+  const k = Math.max(0.8, r * 0.8);
+  return { x: b.x + Math.cos(a) * k, z: b.z + Math.sin(a) * k };
+}
+
+function defendPlan(w: WorldState, p: Person, b: Beast): Act | null {
+  // 비어 있는 망루·성루·포대가 가까우면 올라가서 쏜다
+  const tower = nearest(w.structures, b.x, b.z, (s) =>
+    !!TOWER[s.type] && s.prog >= 1 && (s.dmg ?? 0) < 0.6 && dist(s.x, s.z, b.x, b.z) < towerRange(s) + 16 &&
+    !w.people.some((q) => q.act?.k === "defend" && q.act.sub === "tower" && q.act.n === s.id), 60);
+  if (tower && dist(p.x, p.z, tower.x, tower.z) < 45) return act(w, "defend", tower.x, tower.z, 2 * HOUR, { tid: b.id, n: tower.id, sub: "tower", run: 1 });
+  const wp = pickWeapon(w);
+  const st = standoff(p, b, wp.range);
+  return act(w, "defend", st.x, st.z, 2 * HOUR, { tid: b.id, sub: wp.res || "bare", run: 1 });
+}
+
+/** 집이나 튼튼한 건물로 숨는다. 숨을 곳이 없으면 멀리 달아난다 */
+function hidePlan(w: WorldState, ctx: Ctx, p: Person, b: Beast): Act {
+  const home = homeOf(w, p);
+  if (home && shelterOk(home) && dist(home.x, home.z, b.x, b.z) > 3) {
+    const st = sleepSpot(w, ctx, p);
+    return act(w, "hide", st.x, st.z, 6 * HOUR, { run: 1, tid: b.id });
+  }
+  const hut = nearest(w.structures, p.x, p.z, (s) => shelterOk(s) && dist(s.x, s.z, b.x, b.z) > 4, 90);
+  if (hut) {
+    const st = spot(p, hut.x, hut.z, STRUCTS[hut.type].radius * 0.4);
+    return act(w, "hide", st.x, st.z, 6 * HOUR, { run: 1, tid: b.id });
+  }
+  const a = Math.atan2(p.z - b.z, p.x - b.x);
+  for (const r of [28, 18, 10]) {
+    const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+    if (ctx.T.isLand(x, z)) return act(w, "hide", x, z, HOUR, { run: 1, tid: b.id });
+  }
+  return act(w, "hide", p.x, p.z, 30 * MIN, { ph: 1, tid: b.id });
+}
+
 /** 쓰나미를 피해 가장 가까운 높은 곳으로 */
 function evacPlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
   const T = ctx.T;
@@ -1538,6 +1755,7 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const e = evacPlan(w, ctx, p);
     if (e) return e;
   }
+  const bst = yrs >= 3 ? threatFor(w, p) : null;
   if (yrs < 3) {
     const carer = p.parents.map((id) => findById(w.people, id)).find((q) => q?.alive) ?? living(w).find((q) => isAdult(w, q));
     if (carer && carer.act?.k === "sleep") {
@@ -1558,6 +1776,21 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   };
   const lv = illOf(p);
   const camp = campOf(w, p);
+
+  // 맹수가 나타났을 때: 싸울 수 있는 사람은 무기를 들고, 나머지는 집으로 숨는다
+  if (bst) {
+    const N = p.traits.neuroticism;
+    const able = yrs >= 16 && yrs <= 62 && p.health > 40 && lv < 2 && !p.preg;
+    const fighting = w.people.filter((q) => q.act?.k === "defend" && q.act.tid === bst.id).length;
+    const most = Math.max(2, Math.ceil(ctx.adults * 0.6));
+    if (able && fighting < most) {
+      const odds = (teamPower(w, Math.min(most, ctx.adults)) * 6) / Math.max(1, bst.hp);
+      const wp = pickWeapon(w);
+      const s = 1.0 + (1 - N) * 0.35 - p.emo.fear * 0.25 + wp.dmg / 120 + (odds < 1 ? -0.7 : odds > 2 ? 0.15 : 0);
+      add("defend", s, () => defendPlan(w, p, bst));
+    }
+    add("hide", 0.92 + p.emo.fear * 0.3 + (kid || elder || lv >= 2 ? 0.8 : 0) + (able ? 0 : 0.3), () => hidePlan(w, ctx, p, bst));
+  }
 
   // 아플 때
   if (lv >= 5 && !isolated(w, p)) add("isolate", 1.3, () => restPlan(w, ctx, p, true));
@@ -1694,13 +1927,24 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   if (!kid && w.time - (p.seen.buildFail ?? -1e9) > 0.5 * HOUR) {
     const ps = projects(w);
     const grave = ps.find((s) => s.type === "grave");
-    const proj = grave ?? ps.find((s) => s.paid || hasStock(w, STRUCTS[s.type].cost));
+    const proj = grave ?? ps.find((s) => s.plan !== 0 && (s.paid || hasStock(w, STRUCTS[s.type].cost)));
     if (proj && (proj.paid || hasStock(w, STRUCTS[proj.type].cost))) {
       const housing = isHouse(proj.type) && houseCapacity(w) < ctx.pop ? 0.12 : 0;
       add("build", 0.34 + 0.3 * C + (proj.type === "grave" ? 0.35 : 0) + housing - (elder ? 0.1 : 0), () => {
         const ang = Math.atan2(p.z - proj.z, p.x - proj.x);
         const r = STRUCTS[proj.type].radius + 0.5;
         return act(w, "build", proj.x + Math.cos(ang) * r, proj.z + Math.sin(ang) * r, 1 * HOUR, { tid: proj.id });
+      });
+    }
+  }
+
+  // 처음 짓는 건물은 누군가 용도에 맞게 설계부터 한다
+  if (!kid && !teen) {
+    const draft = projects(w).find((s) => s.plan === 0 && !w.people.some((q) => q !== p && q.act?.k === "design" && q.act.tid === s.id));
+    if (draft) {
+      add("design", 0.4 + O * 0.2 + C * 0.1, () => {
+        const st = spot(p, draft.x, draft.z, STRUCTS[draft.type].radius + 0.8);
+        return act(w, "design", st.x, st.z, (40 * MIN) / skill(p, "think"), { tid: draft.id });
       });
     }
   }
@@ -1830,8 +2074,11 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
 
   // 탐험 / 배회
   const early = w.time < 3 * DAY;
-  add("explore", (0.1 + O * 0.12) * (early ? 1.5 : 0.4), () => {
-    const pt = T.randomPoint(w, (x, z) => T.isLand(x, z) && dist(x, z, p.x, p.z) > 15 && dist(x, z, p.x, p.z) < 45, 40);
+  const prospect = !w.found.includes("vein") && knows(w, "polished") && !kid;
+  add("explore", (0.1 + O * 0.12) * (early ? 1.5 : prospect ? 1.1 : 0.4), () => {
+    const pt = prospect && chance(w, 0.6)
+      ? T.randomPoint(w, (x, z) => T.isLand(x, z) && dist(x, z, w.camp.x, w.camp.z) > 40, 60)
+      : T.randomPoint(w, (x, z) => T.isLand(x, z) && dist(x, z, p.x, p.z) > 15 && dist(x, z, p.x, p.z) < 45, 40);
     return pt ? act(w, "explore", pt.x, pt.z, range(w, 5, 15) * MIN) : null;
   });
   add("wander", 0.1, () => {
@@ -1861,11 +2108,13 @@ export const ACT_LABEL: Record<ActKind, string> = {
   rest: "앓아누워 쉬는 중", isolate: "떨어져서 요양하는 중", nurse: "아픈 사람을 돌보는 중", medicate: "약을 먹는 중",
   dig: "땅을 파며 약재를 찾는 중", council: "모여서 의논하는 중", repair: "부서진 곳을 고치는 중",
   evacuate: "높은 곳으로 피하는 중", fight: "다투는 중", board: "떠날 채비를 하는 중",
+  defend: "맹수와 맞서 싸우는 중", hide: "맹수를 피해 숨은 중", design: "건물을 설계하는 중",
 };
 
 export function actLabel(a: Act | null) {
   if (!a) return "";
   if (a.k === "gather" && a.ph === 2) return `${RES_NAME[a.res!] ?? "짐"}을(를) 나르는 중`;
+  if (a.k === "gather" && a.res && METAL_INFO[a.res as Metal]) return `광맥에서 ${RES_NAME[a.res]} 캐는 중`;
   if (a.k === "gather" && a.res) return a.res === "wood" ? "나무를 베는 중" : `${RES_NAME[a.res]} 모으는 중`;
   if (a.ph === 2) return "짐을 나르는 중";
   if (a.k === "leisure") {
@@ -1876,5 +2125,6 @@ export function actLabel(a: Act | null) {
   if (a.k === "farm") return a.sub === "harvest" ? "수확하는 중" : "씨앗을 심는 중";
   if (a.k === "fish" && a.sub === "boat") return "배를 타고 고기를 잡는 중";
   if (a.k === "dig" && a.res === "mineral") return "땅을 파며 광맥을 찾는 중";
+  if (a.k === "defend") return a.sub === "tower" ? "높은 곳에서 맹수를 겨누는 중" : `${weaponOf(a.sub).name}${a.sub && a.sub !== "bare" ? "을(를) 들고" : "으로"} 맹수와 맞서는 중`;
   return ACT_LABEL[a.k];
 }

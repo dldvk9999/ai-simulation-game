@@ -1,6 +1,8 @@
-// 관찰자의 손길: 치기(클릭) · 옮기기(드래그) · 불 지피기(연타)
+// 관찰자의 손길: 치기(클릭) · 옮기기(드래그) · 불 지피기(연타) · 건물 두드리기(세 번 연달아)
+import { beastName } from "./beasts";
+import { smash } from "./building";
 import { TIME_SCALE } from "./constants";
-import { TECH_BY_ID } from "./data";
+import { METAL_INFO, TECH_BY_ID } from "./data";
 import { isTree } from "./ecology";
 import { feel, lying, say } from "./people";
 import { chance, range } from "./rng";
@@ -45,6 +47,11 @@ export function applyInteraction(w: WorldState, T: Terrain, i: Interaction) {
     case "dragStart": return dragStart(w, i);
     case "dragMove": return dragMove(w, i);
     case "dragEnd": return dragEnd(w, T, i);
+    case "smash": {
+      const s = i.target.k === "structure" ? findById(w.structures, i.target.id) : undefined;
+      if (s) smash(w, T, s);
+      return;
+    }
   }
 }
 
@@ -70,7 +77,9 @@ function hit(w: WorldState, T: Terrain, i: Interaction) {
     addFx(w, "chip", r.x, r.z, r.id);
     if (r.amt >= 1 && chance(w, 0.4)) {
       r.amt -= 1;
-      const res = r.kind === "ore" ? (knows(w, "metallurgy") ? "ore" : "stone") : r.kind === "clay" ? "clay" : "stone";
+      const res = r.kind === "ore" ? (knows(w, "metallurgy") ? "ore" : "stone")
+        : r.kind === "vein" && r.ore && knows(w, "mining") && chance(w, METAL_INFO[r.ore].purity) ? r.ore
+        : r.kind === "clay" ? "clay" : "stone";
       dropNear(w, T, res, r.x, r.z);
     }
     nearbyReact(w, r.x, r.z, 8, "shake");
@@ -84,6 +93,20 @@ function hit(w: WorldState, T: Terrain, i: Interaction) {
     a.until = Math.min(a.until, w.time + 40 * TIME_SCALE);
     addFx(w, "stun", a.x, a.z, a.id);
     nearbyReact(w, a.x, a.z, 8, "shake");
+    return;
+  }
+  if (k === "beast") {
+    // 맹수를 내리치면 잠깐 휘청인다 (센 놈일수록 금방 정신을 차린다)
+    const b = findById(w.beasts, id);
+    if (!b || b.st === "dead" || b.st === "leave") return;
+    b.st = "stun";
+    b.stun = Math.min(Math.max(b.stun, w.time) + (9 / Math.sqrt(b.pow)) * TIME_SCALE, w.time + 25 * TIME_SCALE);
+    addFx(w, "stun", b.x, b.z, b.id);
+    for (const p of w.people) {
+      if (!p.alive || lying(p) || dist(p.x, p.z, b.x, b.z) > 20) continue;
+      feel(w, p, "surprise", 0.3, false);
+      if (chance(w, 0.3)) say(w, p, "beastStun", { beast: beastName(b) }, "❗");
+    }
     return;
   }
   if (k === "fish") {

@@ -20,7 +20,13 @@ export type Res =
   | "berry" | "fruit" | "meat" | "fish" | "cookedMeat" | "cookedFish" | "crop" | "meal"
   | "handaxe" | "spear" | "axe" | "basket" | "rod" | "bow" | "hoe" | "pot" | "net"
   /** 약재 원료와 약 */
-  | "root" | "mineral" | "herbal" | "remedy" | "medicine";
+  | "root" | "mineral" | "herbal" | "remedy" | "medicine"
+  /** 광맥에서 캐는 금속과 보석 */
+  | Metal
+  /** 곡괭이 · 무기 · 장신구 */
+  | "pickaxe" | "sword" | "ironsword" | "musket" | "rifle" | "jewelry";
+
+export type Metal = "copper" | "tin" | "iron" | "silver" | "gold" | "diamond";
 
 export type Stock = Partial<Record<Res, number>>;
 
@@ -45,7 +51,7 @@ export interface Plant {
   farm?: number;
 }
 
-export type RockKind = "rock" | "boulder" | "ore" | "clay" | "mineral";
+export type RockKind = "rock" | "boulder" | "ore" | "clay" | "mineral" | "vein";
 
 export interface Rock {
   id: number;
@@ -56,6 +62,8 @@ export interface Rock {
   max: number;
   s: number;
   rot: number;
+  /** 광맥(vein)에서 주로 나오는 것 */
+  ore?: Metal;
 }
 
 export type AnimalKind = "rabbit" | "boar" | "goat" | "crab" | "fowl";
@@ -114,7 +122,8 @@ export type StructureType =
   | "campfire" | "leanto" | "hut" | "loghouse" | "stonehouse" | "storage" | "rack" | "kiln"
   | "farm" | "pen" | "well" | "workshop" | "smelter" | "dock" | "library" | "windmill"
   | "observatory" | "lighthouse" | "grave" | "raft" | "bench"
-  | "infirmary" | "seawall" | "banner" | "hall" | "shipyard" | "portal";
+  | "infirmary" | "seawall" | "banner" | "hall" | "shipyard" | "portal"
+  | "watchtower" | "fort" | "battery" | "townhouse" | "apartment" | "forge" | "factory" | "mine";
 
 export interface Structure {
   id: number;
@@ -140,6 +149,10 @@ export interface Structure {
   fix?: number;
   /** 어느 무리의 것인지 (깃발·분리해 나간 무리의 집) */
   group?: number;
+  /** 층수 (시대가 발전할수록 높게 짓는다) */
+  lv?: number;
+  /** 0이면 아직 설계 중이라 공사를 시작하지 못한다 */
+  plan?: number;
 }
 
 export type Emotion = "joy" | "sadness" | "fear" | "anger" | "surprise" | "love";
@@ -155,13 +168,14 @@ export type ActKind =
   | "think" | "hunt" | "fish" | "cook" | "tend" | "makefire" | "chat" | "leisure" | "farm"
   | "shelter" | "warm" | "mourn" | "care" | "collect" | "react" | "unconscious" | "explore"
   | "tame" | "play" | "follow"
-  | "rest" | "isolate" | "nurse" | "medicate" | "dig" | "council" | "repair" | "evacuate" | "fight" | "board";
+  | "rest" | "isolate" | "nurse" | "medicate" | "dig" | "council" | "repair" | "evacuate" | "fight" | "board"
+  | "defend" | "hide" | "design";
 
 export type Anim =
   | "idle" | "walk" | "run" | "chop" | "pick" | "sit" | "sleep" | "eat" | "think" | "knap"
   | "hammer" | "fish" | "talk" | "sing" | "swim" | "lie" | "carry" | "dig" | "stir" | "cheer"
   | "dance" | "slump" | "cower" | "stomp" | "startle" | "heart" | "stretch" | "wave" | "pray"
-  | "drink" | "throw" | "play" | "cough" | "fight" | "row";
+  | "drink" | "throw" | "play" | "cough" | "fight" | "row" | "aim" | "slash" | "mine";
 
 export interface Act {
   k: ActKind;
@@ -287,9 +301,43 @@ export interface Voyage {
   from: { x: number; z: number; rot: number };
 }
 
+export type BeastKind = "wolf" | "bear" | "tiger" | "sabertooth";
+
+/** 사람을 해칠 수 있는 맹수. 섬에서 보낸 날이 길수록 강한 놈이 나타난다 */
+export interface Beast {
+  id: number;
+  kind: BeastKind;
+  x: number;
+  z: number;
+  rot: number;
+  /** 어슬렁 · 쫓기 · 덮치기 · 기절 · 물러남 · 쓰러짐 */
+  st: "prowl" | "chase" | "maul" | "stun" | "leave" | "dead";
+  hp: number;
+  max: number;
+  /** 강한 정도 (나타난 날에 따라 정해진다) */
+  pow: number;
+  tx: number;
+  tz: number;
+  /** 노리는 사람 / 부수는 건물 */
+  target: number | null;
+  siege: number | null;
+  /** 이 시각이 지나면 숲으로 돌아간다 */
+  until: number;
+  stun: number;
+  /** 다음 공격까지 남은 시간 */
+  atk: number;
+  /** 돌아갈 곳 */
+  home: { x: number; z: number };
+  born: number;
+  /** 쓰러진 뒤 사라지는 시각 */
+  gone?: number;
+  /** 맞서 싸운 사람들 */
+  foes: number[];
+}
+
 export type ChronicleKind =
   | "arrive" | "discover" | "build" | "birth" | "death" | "couple" | "weather" | "gift" | "era" | "misc" | "season"
-  | "disease" | "disaster" | "society" | "voyage";
+  | "disease" | "disaster" | "society" | "voyage" | "beast";
 
 export interface ChronicleEntry {
   t: number;
@@ -300,7 +348,8 @@ export interface ChronicleEntry {
 export type FxType =
   | "hit" | "spark" | "ignite" | "fizzle" | "chip" | "shake" | "splash" | "lightning" | "eureka"
   | "drop" | "stun" | "complete" | "birth" | "arrive" | "catch" | "chop"
-  | "dust" | "heal" | "clash" | "portal" | "collapse";
+  | "dust" | "heal" | "clash" | "portal" | "collapse"
+  | "roar" | "shot" | "bite" | "crack";
 
 export interface Fx {
   id: number;
@@ -337,22 +386,34 @@ export interface WorldState {
   timers: {
     castaway: number; fish: number; day: number; strike: number; animals: number; stormLog?: number; snowLog?: number;
     disaster?: number; voyage?: number; council?: number;
+    /** 다음 맹수가 올 수 있는 날, 오늘 나타날 시각, 사기가 바닥난 시각, 무기 이야기를 남긴 시각 */
+    beast?: number; beastAt?: number; moraleLow?: number; weaponGap?: number;
   };
   fx: Fx[];
   // ─── v2 ───
   groups: Group[];
   disaster: Disaster | null;
   /** 겪어 본 일들 (대비책 연구의 계기) */
-  history: { quake: number; typhoon: number; tsunami: number; sick: number; wars: number; lastDisaster: number; lastType: DisasterType | null };
-  /** 찾아낸 약재 원료 */
+  history: {
+    quake: number; typhoon: number; tsunami: number; sick: number; wars: number; lastDisaster: number; lastType: DisasterType | null;
+    /** 맹수가 나타난 횟수와 마지막 시각 */
+    beast?: number; lastBeast?: number;
+  };
+  /** 찾아낸 약재 원료 · 광맥 · 금속 */
   found: string[];
   /** 아직 아무도 모르는 광맥 */
   deposits: { x: number; z: number }[];
   voyages: Voyage[];
+  // ─── v3 ───
+  beasts: Beast[];
+  /** 사람들의 사기 0..100 */
+  morale: number;
+  /** 이미 설계해 본 건물 ("종류:층수") */
+  designs: string[];
 }
 
-export type InteractionKind = "hit" | "ignite" | "dragStart" | "dragMove" | "dragEnd";
-export type TargetKind = "plant" | "rock" | "animal" | "fish" | "item" | "structure" | "ground" | "water" | "person";
+export type InteractionKind = "hit" | "ignite" | "dragStart" | "dragMove" | "dragEnd" | "smash";
+export type TargetKind = "plant" | "rock" | "animal" | "fish" | "item" | "structure" | "ground" | "water" | "person" | "beast";
 
 export interface Interaction {
   kind: InteractionKind;

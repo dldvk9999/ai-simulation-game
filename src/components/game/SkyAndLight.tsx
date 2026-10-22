@@ -3,6 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useRuntime } from "./context";
+import { camState } from "./Controls";
 import { env, updateEnv } from "./env";
 
 const skyVert = /* glsl */ `
@@ -143,7 +144,11 @@ export function SkyAndLight() {
       starMat.uniforms.uOpacity.value = env.night * (1 - env.cloud * 0.95);
     }
     if (sun.current) {
-      sun.current.position.copy(env.sunDir).multiplyScalar(120);
+      // 그림자는 지금 보고 있는 곳을 중심으로 (섬이 넓어져 한 번에 다 담으면 흐려진다)
+      const c = camState.cur;
+      sun.current.target.position.set(c.tx, 0, c.tz);
+      sun.current.target.updateMatrixWorld();
+      sun.current.position.copy(env.sunDir).multiplyScalar(120).add(sun.current.target.position);
       sun.current.color.copy(env.sunColor);
       sun.current.intensity = env.sunIntensity;
       sun.current.castShadow = env.sunIntensity > 0.05;
@@ -171,10 +176,10 @@ export function SkyAndLight() {
         castShadow
         intensity={2}
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-95}
-        shadow-camera-right={95}
-        shadow-camera-top={95}
-        shadow-camera-bottom={-95}
+        shadow-camera-left={-85}
+        shadow-camera-right={85}
+        shadow-camera-top={85}
+        shadow-camera-bottom={-85}
         shadow-camera-near={1}
         shadow-camera-far={320}
         shadow-bias={-0.0006}

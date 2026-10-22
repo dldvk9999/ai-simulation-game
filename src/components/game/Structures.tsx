@@ -33,7 +33,144 @@ interface Model {
   windows?: THREE.BufferGeometry;
 }
 
-function buildModel(type: StructureType): Model {
+const BRICK = "#b5654a";
+const CREAM = "#efe4cc";
+const SLATE = "#56606b";
+
+/** 층마다 창을 낸다 (앞뒤, 양옆) */
+function floorWindows(w: number, d: number, y: number, per: number) {
+  const out = [];
+  for (let i = 0; i < per; i++) {
+    const z = -d / 2 + (d / per) * (i + 0.5);
+    out.push(part(G.box, { color: "#ffffff", pos: [w / 2 + 0.02, y, z], scale: [0.06, 0.62, 0.5] }));
+    out.push(part(G.box, { color: "#ffffff", pos: [-w / 2 - 0.02, y, z], scale: [0.06, 0.62, 0.5] }));
+  }
+  for (const x of [-w / 4, w / 4]) {
+    out.push(part(G.box, { color: "#ffffff", pos: [x, y, d / 2 + 0.02], scale: [0.5, 0.62, 0.06] }));
+    out.push(part(G.box, { color: "#ffffff", pos: [x, y, -d / 2 - 0.02], scale: [0.5, 0.62, 0.06] }));
+  }
+  return out;
+}
+
+/** 층수에 따라 높아지는 건물들 */
+function storied(type: StructureType, lv: number): Model | null {
+  switch (type) {
+    case "watchtower": {
+      // 나무 기둥 위의 망대: 층마다 가새를 엇갈려 묶었다
+      const H = lv * 2.2;
+      const parts = [];
+      for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) parts.push(part(G.cyl(0.09, 0.12, H + 0.4, 5), { color: WOOD_D, pos: [x * 0.85, (H + 0.4) / 2, z * 0.85], rot: [z * 0.05, 0, -x * 0.05] }));
+      for (let i = 0; i < lv; i++) {
+        const y = 1.1 + i * 2.2;
+        parts.push(part(G.box, { color: WOOD, pos: [0.85, y, 0], scale: [0.06, 0.08, 2.2], rot: [0.75, 0, 0] }));
+        parts.push(part(G.box, { color: WOOD, pos: [-0.85, y, 0], scale: [0.06, 0.08, 2.2], rot: [-0.75, 0, 0] }));
+        parts.push(part(G.box, { color: WOOD, pos: [0, y, 0.85], scale: [2.2, 0.08, 0.06], rot: [0, 0, 0.75] }));
+        parts.push(part(G.box, { color: WOOD, pos: [0, y, -0.85], scale: [2.2, 0.08, 0.06], rot: [0, 0, -0.75] }));
+      }
+      parts.push(part(G.box, { color: WOOD, pos: [0, H, 0], scale: [2.3, 0.14, 2.3] }));
+      for (const [x, z, w, d] of [[1.1, 0, 0.08, 2.3], [-1.1, 0, 0.08, 2.3], [0, 1.1, 2.3, 0.08], [0, -1.1, 2.3, 0.08]]) parts.push(part(G.box, { color: WOOD_D, pos: [x, H + 0.45, z], scale: [w, 0.7, d] }));
+      parts.push(part(G.cone(1.75, 1.2, 4), { color: STRAW, pos: [0, H + 1.85, 0], rot: [0, Math.PI / 4, 0] }));
+      for (const [x, z] of [[1, 1], [-1, -1], [1, -1], [-1, 1]]) parts.push(part(G.cyl(0.05, 0.05, 1.3, 4), { color: WOOD_D, pos: [x * 1.05, H + 0.9, z * 1.05] }));
+      // 사다리
+      parts.push(part(G.box, { color: WOOD_D, pos: [1.25, H / 2, 0.25], scale: [0.06, H, 0.06], rot: [0, 0, 0.12] }));
+      parts.push(part(G.box, { color: WOOD_D, pos: [1.25, H / 2, -0.25], scale: [0.06, H, 0.06], rot: [0, 0, 0.12] }));
+      for (let y = 0.5; y < H; y += 0.5) parts.push(part(G.box, { color: WOOD, pos: [1.25 + (H / 2 - y) * 0.12, y, 0], scale: [0.05, 0.05, 0.5] }));
+      return { geo: merge(parts) };
+    }
+    case "fort": {
+      // 돌을 쌓은 성루: 위에는 성가퀴, 벽에는 활 쏘는 구멍
+      const H = lv * 2.3;
+      const parts = [
+        part(G.box, { color: STONE_D, pos: [0, 0.3, 0], scale: [4.0, 0.6, 4.0] }),
+        part(G.cyl(1.9, 2.15, H, 4), { color: "#b7b1a7", pos: [0, H / 2 + 0.3, 0], rot: [0, Math.PI / 4, 0] }),
+        part(G.box, { color: STONE_D, pos: [0, H + 0.4, 0], scale: [3.1, 0.25, 3.1] }),
+        part(G.box, { color: "#4f3a2a", pos: [1.56, 1.0, 0], scale: [0.1, 1.5, 0.9] }),
+      ];
+      for (let i = 0; i < 4; i++) for (const k of [-1, 0, 1]) {
+        const a = (i * Math.PI) / 2;
+        const ox = Math.cos(a) * 1.5 - Math.sin(a) * k * 1.05, oz = Math.sin(a) * 1.5 + Math.cos(a) * k * 1.05;
+        parts.push(part(G.box, { color: "#c2bdb3", pos: [ox, H + 0.8, oz], scale: [0.5, 0.55, 0.5] }));
+      }
+      const slits = [];
+      for (let f = 1; f < lv; f++) for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2 + 0.0;
+        slits.push(part(G.box, { color: "#ffffff", pos: [Math.cos(a) * 1.62, f * 2.3 + 0.5, Math.sin(a) * 1.62], scale: [i % 2 ? 0.14 : 0.06, 0.55, i % 2 ? 0.06 : 0.14] }));
+      }
+      parts.push(part(G.cyl(0.04, 0.04, 1.8, 4), { color: WOOD_D, pos: [-1.1, H + 1.5, -1.1] }));
+      return { geo: merge(parts), windows: slits.length ? merge(slits) : undefined };
+    }
+    case "battery": {
+      // 둥근 돌 포대 위에 대포 한 문
+      const parts = [
+        part(G.cyl(2.2, 2.4, 1.5, 12), { color: "#a8a39a", pos: [0, 0.75, 0] }),
+        part(G.cyl(2.25, 2.25, 0.5, 12), { color: STONE_D, pos: [0, 1.75, 0] }),
+        part(G.cyl(1.8, 1.8, 0.1, 12), { color: "#8f8a82", pos: [0, 1.55, 0] }),
+        part(G.box, { color: WOOD_D, pos: [0.2, 1.9, 0], scale: [1.0, 0.3, 0.8] }),
+        part(G.cyl(0.32, 0.32, 0.12, 8), { color: WOOD_D, pos: [0.2, 1.75, 0.48], rot: [Math.PI / 2, 0, 0] }),
+        part(G.cyl(0.32, 0.32, 0.12, 8), { color: WOOD_D, pos: [0.2, 1.75, -0.48], rot: [Math.PI / 2, 0, 0] }),
+        part(G.cyl(0.17, 0.24, 2.2, 8), { color: "#2f3135", pos: [1.0, 2.25, 0], rot: [0, 0, -Math.PI / 2 + 0.18] }),
+        part(G.box, { color: "#4f3a2a", pos: [-2.25, 0.6, 0], scale: [0.1, 1.0, 0.8] }),
+      ];
+      for (let i = 0; i < 6; i++) parts.push(part(G.ico(0.14, 0), { color: "#2f3135", pos: [-0.6 + (i % 3) * 0.28, 1.72 + Math.floor(i / 3) * 0.22, -1.0] }));
+      return { geo: merge(parts) };
+    }
+    case "townhouse": {
+      // 여러 가족이 함께 사는 층집: 층마다 띠를 두르고 창을 냈다
+      const W = 5.0, D = 3.8, FH = 2.4, H = lv * FH;
+      const parts = [part(G.box, { color: STONE_D, pos: [0, 0.15, 0], scale: [W + 0.3, 0.3, D + 0.3] })];
+      const win = [];
+      for (let f = 0; f < lv; f++) {
+        parts.push(part(G.box, { color: f % 2 ? "#dcd2bd" : CREAM, pos: [0, f * FH + FH / 2 + 0.2, 0], scale: [W, FH, D] }));
+        parts.push(part(G.box, { color: BRICK, pos: [0, (f + 1) * FH + 0.2, 0], scale: [W + 0.12, 0.14, D + 0.12] }));
+        win.push(...floorWindows(W, D, f * FH + 1.5, 3));
+      }
+      parts.push(...gable(W, D, 1.4, H + 0.27, ROOF, CREAM));
+      parts.push(part(G.box, { color: "#4f3a2a", pos: [W / 2 + 0.03, 0.95, 0], scale: [0.06, 1.5, 0.8] }));
+      parts.push(part(G.box, { color: BRICK, pos: [-1.4, H + 1.4, -1.0], scale: [0.45, 1.4, 0.45] }));
+      return { geo: merge(parts), windows: merge(win) };
+    }
+    case "apartment": {
+      // 철골 고층 건물: 옥상에는 물탱크
+      const W = 5.4, D = 5.0, FH = 2.4, H = lv * FH;
+      const parts = [
+        part(G.box, { color: "#8f949a", pos: [0, 0.15, 0], scale: [W + 0.4, 0.3, D + 0.4] }),
+        part(G.box, { color: "#d9d6cf", pos: [0, H / 2 + 0.3, 0], scale: [W, H, D] }),
+        part(G.box, { color: "#a6abb1", pos: [0, H + 0.42, 0], scale: [W + 0.15, 0.25, D + 0.15] }),
+        part(G.cyl(0.6, 0.6, 1.2, 10), { color: "#8a6a4a", pos: [-1.3, H + 1.15, 1.1] }),
+        part(G.cone(0.65, 0.4, 10), { color: "#6e5034", pos: [-1.3, H + 1.95, 1.1] }),
+        part(G.box, { color: SLATE, pos: [W / 2 + 0.5, 2.6, 0], scale: [1.0, 0.12, 2.0] }),
+        part(G.box, { color: "#3b4652", pos: [W / 2 + 0.03, 1.2, 0], scale: [0.06, 2.0, 1.4] }),
+      ];
+      for (let f = 1; f < lv; f++) parts.push(part(G.box, { color: "#bfbab1", pos: [0, f * FH + 0.3, 0], scale: [W + 0.08, 0.1, D + 0.08] }));
+      const win = [];
+      for (let f = 0; f < lv; f++) win.push(...floorWindows(W, D, f * FH + 1.5, 4));
+      return { geo: merge(parts), windows: merge(win) };
+    }
+    case "factory": {
+      // 톱니 지붕의 벽돌 공장과 높은 굴뚝
+      const W = 6.2, D = 4.4, FH = 2.6, H = lv * FH;
+      const parts = [
+        part(G.box, { color: STONE_D, pos: [0, 0.15, 0], scale: [W + 0.3, 0.3, D + 0.3] }),
+        part(G.box, { color: BRICK, pos: [0, H / 2 + 0.3, 0], scale: [W, H, D] }),
+        part(G.cyl(0.45, 0.6, H + 5, 10), { color: "#8e4a36", pos: [-W / 2 + 0.6, (H + 5) / 2, -D / 2 + 0.6] }),
+        part(G.cyl(0.5, 0.5, 0.3, 10), { color: "#3a3a3a", pos: [-W / 2 + 0.6, H + 5.1, -D / 2 + 0.6] }),
+        part(G.box, { color: "#3b4652", pos: [W / 2 + 0.03, 1.2, 0], scale: [0.06, 2.0, 1.6] }),
+      ];
+      for (let i = 0; i < 4; i++) {
+        const z = -D / 2 + D / 8 + (i * D) / 4;
+        parts.push(part(G.box, { color: SLATE, pos: [0, H + 0.75, z], scale: [W, 0.1, 1.3], rot: [0.55, 0, 0] }));
+      }
+      const win = [];
+      for (let f = 0; f < lv; f++) win.push(...floorWindows(W, D, f * FH + 1.6, 4));
+      return { geo: merge(parts), windows: merge(win) };
+    }
+  }
+  return null;
+}
+
+function buildModel(type: StructureType, lv = 1): Model {
+  const tall = storied(type, lv);
+  if (tall) return tall;
   switch (type) {
     case "campfire": {
       const parts = [];
@@ -313,6 +450,40 @@ function buildModel(type: StructureType): Model {
       parts.push(part(G.box, { color: "#c9b48a", pos: [-1.6, 0.62, 1.7], scale: [0.6, 0.18, 0.6] }));
       return { geo: merge(parts) };
     }
+    case "forge": {
+      // 화덕과 모루가 있는 대장간: 화덕 불빛은 밤에도 빛난다
+      return {
+        geo: merge([
+          part(G.box, { color: STONE_D, pos: [0, 0.1, 0], scale: [3.4, 0.2, 3.0] }),
+          ...[[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([x, z]) => part(G.cyl(0.09, 0.1, 2.3, 5), { color: WOOD_D, pos: [x * 1.45, 1.15, z * 1.25] })),
+          part(G.box, { color: "#6e4a30", pos: [0, 2.35, 0], scale: [3.5, 0.14, 3.0], rot: [0.1, 0, 0] }),
+          part(G.box, { color: "#a8a39a", pos: [-0.9, 0.7, -0.6], scale: [1.2, 1.2, 1.2] }),
+          part(G.cyl(0.32, 0.4, 2.8, 6), { color: "#8f8a82", pos: [-0.9, 2.4, -0.6] }),
+          part(G.box, { color: "#3a3a3d", pos: [0.6, 0.6, 0.5], scale: [0.7, 0.25, 0.32] }),
+          part(G.box, { color: "#3a3a3d", pos: [0.6, 0.35, 0.5], scale: [0.3, 0.5, 0.25] }),
+          part(G.box, { color: WOOD, pos: [1.0, 0.45, -0.8], scale: [0.6, 0.7, 0.5] }),
+        ]),
+        windows: merge([part(G.box, { color: "#ffffff", pos: [-0.28, 0.65, -0.6], scale: [0.06, 0.45, 0.6] })]),
+      };
+    }
+    case "mine": {
+      // 바위 언덕에 뚫은 갱도 입구와 광차
+      const parts = [
+        part(G.dodec(1.9), { color: "#7d736b", scale: [1.3, 0.85, 1.25], pos: [-0.9, 0.9, 0] }),
+        part(G.box, { color: "#1b1714", pos: [0.25, 0.85, 0], scale: [0.4, 1.5, 1.2] }),
+        part(G.cyl(0.09, 0.1, 1.8, 5), { color: WOOD_D, pos: [0.5, 0.9, 0.7] }),
+        part(G.cyl(0.09, 0.1, 1.8, 5), { color: WOOD_D, pos: [0.5, 0.9, -0.7] }),
+        part(G.box, { color: WOOD, pos: [0.5, 1.85, 0], scale: [0.22, 0.2, 1.8] }),
+        part(G.box, { color: "#5e5a55", pos: [1.6, 0.03, 0.3], scale: [2.4, 0.06, 0.08] }),
+        part(G.box, { color: "#5e5a55", pos: [1.6, 0.03, -0.3], scale: [2.4, 0.06, 0.08] }),
+        part(G.box, { color: "#6b5d50", pos: [1.9, 0.4, 0], scale: [0.9, 0.45, 0.7] }),
+        part(G.ico(0.15, 0), { color: "#9c4f34", pos: [1.8, 0.7, 0.1] }),
+        part(G.ico(0.13, 0), { color: "#c9773a", pos: [2.05, 0.68, -0.1] }),
+        part(G.cyl(0.12, 0.12, 0.08, 6), { color: "#2f3135", pos: [1.6, 0.15, 0.36], rot: [Math.PI / 2, 0, 0] }),
+        part(G.cyl(0.12, 0.12, 0.08, 6), { color: "#2f3135", pos: [2.2, 0.15, 0.36], rot: [Math.PI / 2, 0, 0] }),
+      ];
+      return { geo: merge(parts), windows: merge([part(G.box, { color: "#ffffff", pos: [0.48, 1.2, 0], scale: [0.04, 0.16, 0.16] })]) };
+    }
     case "portal": {
       // 돌기둥 사이의 고리 (안쪽 빛은 따로 그린다)
       const parts = [
@@ -328,18 +499,23 @@ function buildModel(type: StructureType): Model {
       return { geo: merge(parts) };
     }
   }
+  return { geo: merge([part(G.box, { color: WOOD, pos: [0, 0.5, 0] })]) };
 }
 
-const MODELS = new Map<StructureType, Model>();
-const modelOf = (t: StructureType) => {
-  let m = MODELS.get(t);
-  if (!m) MODELS.set(t, (m = buildModel(t)));
+const MODELS = new Map<string, Model>();
+const modelOf = (t: StructureType, lv = 1) => {
+  const key = `${t}:${lv}`;
+  let m = MODELS.get(key);
+  if (!m) MODELS.set(key, (m = buildModel(t, lv)));
   return m;
 };
 
 const windowMat = new THREE.MeshStandardMaterial({ color: "#bfe3ff", emissive: new THREE.Color("#ffcf7a"), emissiveIntensity: 0, flatShading: true });
 const scaffoldMat = new THREE.MeshStandardMaterial({ color: "#c9a26b", flatShading: true, transparent: true, opacity: 0.85 });
 const ghostMat = new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.18, depthWrite: false });
+/** 아직 설계 중인 건물: 푸른 도면처럼 */
+const planMat = new THREE.MeshBasicMaterial({ color: "#7fb8ff", transparent: true, opacity: 0.2, depthWrite: false, wireframe: true });
+const stringMat = new THREE.MeshBasicMaterial({ color: "#f2e6c9" });
 const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 4);
 const rubbleGeo = merge([
   part(G.box, { color: "#7a5235", pos: [1.1, 0.08, 0.6], scale: [0.9, 0.12, 0.18], rot: [0, 0.6, 0.1] }),
@@ -357,12 +533,13 @@ const beamGeo = new THREE.ConeGeometry(2.2, 26, 16, 1, true).rotateZ(Math.PI / 2
 const beamMat = new THREE.MeshBasicMaterial({ color: "#fff3c4", transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
 
 function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
-  const model = modelOf(s.type);
+  const model = modelOf(s.type, s.lv ?? 1);
   const def = STRUCTS[s.type];
+  const planning = s.plan === 0 && s.prog < 1;
   const flatOnGround = s.type === "farm" || s.type === "pen" || s.type === "grave";
   const groundY = s.type === "dock" ? 0 : s.type === "raft" ? Math.max(-0.15, terrain.height(s.x, s.z)) : terrain.height(s.x, s.z) - (flatOnGround ? 0.1 : 0.05);
   const done = s.prog >= 1;
-  const sy = done ? 1 : 0.12 + 0.88 * s.prog;
+  const sy = done ? 1 : planning ? 0.02 : 0.12 + 0.88 * s.prog;
   // 밭·우리는 땅의 기울기를 따라 눕힌다
   const tilt = useMemo(() => {
     if (!flatOnGround) return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -s.rot);
@@ -391,11 +568,23 @@ function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
           ))}
         </>
       )}
-      {!done && (
+      {!done && planning && (
+        <>
+          <mesh geometry={model.geo} material={planMat} />
+          {[[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([x, z], i) => (
+            <mesh key={i} geometry={poleGeo} material={stringMat} position={[x * def.radius * 0.75, 0.3, z * def.radius * 0.75]} scale={[1, 0.6, 1]} />
+          ))}
+          {[[0, 1], [0, -1], [1, 0], [-1, 0]].map(([x, z], i) => (
+            <mesh key={`s${i}`} geometry={poleGeo} material={stringMat} position={[x * def.radius * 0.75, 0.5, z * def.radius * 0.75]}
+              rotation={x ? [Math.PI / 2, 0, 0] : [0, 0, Math.PI / 2]} scale={[0.4, def.radius * 1.5, 0.4]} />
+          ))}
+        </>
+      )}
+      {!done && !planning && (
         <>
           <mesh geometry={model.geo} material={ghostMat} />
           {[[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([x, z], i) => (
-            <mesh key={i} geometry={poleGeo} material={scaffoldMat} position={[x * def.radius * 0.8, 1, z * def.radius * 0.8]} scale={[1, 2, 1]} />
+            <mesh key={i} geometry={poleGeo} material={scaffoldMat} position={[x * def.radius * 0.8, 1, z * def.radius * 0.8]} scale={[1, 2 * (s.lv ?? 1), 1]} />
           ))}
         </>
       )}

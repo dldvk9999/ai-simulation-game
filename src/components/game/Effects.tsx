@@ -54,6 +54,10 @@ const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple", Spec>> = {
   heal: { n: 14, colors: ["#8ce99a", "#d3f9d8", "#ffffff"], speed: 0.6, up: 1.8, life: 1.6, size: 0.22, g: -0.6, spread: 0.4 },
   clash: { n: 10, colors: ["#fff3b0", "#ffd166", "#ffffff"], speed: 2.4, up: 2.2, life: 0.6, size: 0.2, g: 4 },
   portal: { n: 40, colors: ["#9fe8ff", "#b197fc", "#ffffff"], speed: 2.2, up: 2.6, life: 1.8, size: 0.3, g: -0.4, spread: 1.6 },
+  roar: { n: 20, colors: ["#8a7a66", "#a8977e", "#5f564c"], speed: 2.8, up: 0.8, life: 1.6, size: 0.5, g: 0.6, spread: 1.0, grow: 1.4 },
+  shot: { n: 10, colors: ["#fff3b0", "#ffd166", "#d9d9d9"], speed: 2.0, up: 1.4, life: 0.5, size: 0.22, g: 1 },
+  bite: { n: 9, colors: ["#e5484d", "#ffb3b3", "#ffffff"], speed: 1.8, up: 1.6, life: 0.6, size: 0.2, g: 5 },
+  crack: { n: 14, colors: ["#8c6a48", "#a8a39a", "#cbbca5"], speed: 2.0, up: 2.4, life: 1.0, size: 0.24, g: 7, spread: 0.8 },
 };
 
 export function Effects({ terrain }: { terrain: Terrain }) {
@@ -121,6 +125,19 @@ export function Effects({ terrain }: { terrain: Terrain }) {
         y = terrain.height(p?.x ?? f.x, p?.z ?? f.z) + 1.2;
       }
       if (f.type === "portal") y = ground + 2.4;
+      if (f.type === "shot") {
+        y = ground + 1.2;
+        amb?.pop(90, 0.16);
+      }
+      if (f.type === "roar") amb?.pop(70, 0.2);
+      if (f.type === "bite") {
+        y = ground + 0.8;
+        amb?.pop(260, 0.08);
+      }
+      if (f.type === "crack") {
+        y = ground + 1.2;
+        amb?.pop(180, 0.1);
+      }
       spawn(f.type, f.x, y, f.z);
     }
     if (seen.current.size > 3000) seen.current.clear();

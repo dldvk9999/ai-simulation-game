@@ -1,12 +1,12 @@
-import { CHRONICLE_LIMIT, DAY, HOUR, ISLAND_RADIUS, SCHEMA_VERSION, START_HOUR, YEAR } from "./constants";
+import { AREA_MUL, CHRONICLE_LIMIT, DAY, HOUR, ISLAND_RADIUS, SCHEMA_VERSION, START_HOUR, YEAR } from "./constants";
 import { dayOf } from "./clock";
-import { FISH_INFO } from "./data";
+import { FISH_INFO, METAL_INFO, METALS, STRUCTS } from "./data";
 import { clamp } from "./noise";
 import { chance, gauss, int, pick, rand, range, RngHolder, weighted } from "./rng";
 import { getTerrain, Terrain } from "./terrain";
 import { josa, randomName } from "./text";
 import type {
-  Animal, AnimalKind, ChronicleKind, Emotion, Fish, FishKind, FxType, Item, Person, Plant, PlantKind, Res, Rock,
+  Animal, AnimalKind, ChronicleKind, Emotion, Fish, FishKind, FxType, Item, Metal, Person, Plant, PlantKind, Res, Rock,
   RockKind, Stock, Structure, StructureType, Trait, WorldState,
 } from "./types";
 
@@ -93,9 +93,11 @@ export function makePlant(w: WorldState, kind: PlantKind, x: number, z: number, 
   };
 }
 
-export function makeRock(w: WorldState, kind: RockKind, x: number, z: number): Rock {
-  const max = kind === "boulder" ? 30 : kind === "ore" ? 14 : kind === "clay" ? 24 : 12;
-  return { id: newId(w), kind, x, z, amt: max, max, s: range(w, 0.7, 1.3), rot: rand(w) * Math.PI * 2 };
+export function makeRock(w: WorldState, kind: RockKind, x: number, z: number, ore?: Metal): Rock {
+  const max = kind === "boulder" ? 30 : kind === "ore" ? 14 : kind === "clay" ? 24 : kind === "vein" ? 28 : 12;
+  const r: Rock = { id: newId(w), kind, x, z, amt: max, max, s: range(w, 0.7, 1.3), rot: rand(w) * Math.PI * 2 };
+  if (ore) r.ore = ore;
+  return r;
 }
 
 export function makeAnimal(w: WorldState, kind: AnimalKind, x: number, z: number, born = w.time - YEAR): Animal {
@@ -270,38 +272,20 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     found: [],
     deposits: [],
     voyages: [],
+    beasts: [],
+    morale: 70,
+    designs: [],
   };
 
   // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
   plantFlora(w, T, 1.7);
-  const big = w.plants.filter((p) => isBigPlant(p.kind));
-
-  // 바위
-  const rocks: { x: number; z: number }[] = [];
-  const placeRock = (kind: RockKind, n: number, ok: (x: number, z: number) => boolean) => {
-    for (let i = 0, guard = 0; i < n && guard < 2000; guard++) {
-      const pt = T.randomPoint(w, (x, z) => ok(x, z) && spacedOk(rocks, x, z, 3) && spacedOk(big, x, z, 1.6), 50);
-      if (!pt) continue;
-      rocks.push(pt);
-      w.rocks.push(makeRock(w, kind, pt.x, pt.z));
-      i++;
-    }
-  };
-  placeRock("rock", 30, (x, z) => {
-    const b = T.biome(x, z);
-    return (b === "beach" || b === "grass" || b === "forest") && !T.inPond(x, z, 1.5);
-  });
-  placeRock("boulder", 12, (x, z) => T.biome(x, z) === "rock" || T.height(x, z) > 7);
-  placeRock("ore", 6, (x, z) => T.height(x, z) > 7.5 && Math.hypot(x - T.peak.x, z - T.peak.z) < 16);
-  placeRock("clay", 4, (x, z) => {
-    const d = Math.hypot(x - T.pond.x, z - T.pond.z);
-    return d > T.pond.r + 1 && d < T.pond.r + 4;
-  });
+  placeRocks(w, T);
+  placeVeins(w, T);
   w.deposits = makeDeposits(w, T);
 
-  // 동물과 물고기
-  spawnFauna(w, T, 1.7);
-  for (let n = 0; n < 17; ) n += spawnFish(w, T) || 1;
+  // 동물과 물고기 (섬이 넓어진 만큼 더)
+  spawnFauna(w, T, 1.7 * AREA_MUL);
+  for (let n = 0; n < 26; ) n += spawnFish(w, T) || 1;
 
   // 표류자와 야영지
   const { person, camp } = spawnCastaway(w, T, 26 + int(w, 0, 8), undefined, true);
@@ -312,7 +296,54 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
   chron(w, "arrive", `${josa(person.name, "이/가")} 무인도의 해변에서 눈을 떴다.`);
   w.timers.castaway = w.time + 4 * 86400;
   w.timers.disaster = w.time + 30 * DAY;
+  w.timers.beast = w.time + 12 * DAY;
   return w;
+}
+
+/** 바위: avoid가 있으면 그 자리는 피한다 (예전 섬을 넓힐 때 새 땅에만) */
+function placeRocks(w: WorldState, T: Terrain, avoid?: (x: number, z: number) => boolean, mul = AREA_MUL) {
+  const rocks: { x: number; z: number }[] = w.rocks.map((r) => ({ x: r.x, z: r.z }));
+  const big = w.plants.filter((p) => isBigPlant(p.kind));
+  const placeRock = (kind: RockKind, n: number, ok: (x: number, z: number) => boolean) => {
+    for (let i = 0, guard = 0; i < n && guard < 3000; guard++) {
+      const pt = T.randomPoint(w, (x, z) => ok(x, z) && !avoid?.(x, z) && spacedOk(rocks, x, z, 3) && spacedOk(big, x, z, 1.6), 50);
+      if (!pt) continue;
+      rocks.push(pt);
+      w.rocks.push(makeRock(w, kind, pt.x, pt.z));
+      i++;
+    }
+  };
+  placeRock("rock", Math.round(30 * mul), (x, z) => {
+    const b = T.biome(x, z);
+    return (b === "beach" || b === "grass" || b === "forest") && !T.inPond(x, z, 1.5);
+  });
+  placeRock("boulder", Math.round(12 * mul), (x, z) => T.biome(x, z) === "rock" || T.height(x, z) > 7 || (T.inMine(x, z, 4) && !T.inMine(x, z, -1)));
+  if (!avoid) {
+    placeRock("ore", 6, (x, z) => T.height(x, z) > 7.5 && Math.hypot(x - T.peak.x, z - T.peak.z) < 16);
+    placeRock("clay", 4, (x, z) => {
+      const d = Math.hypot(x - T.pond.x, z - T.pond.z);
+      return d > T.pond.r + 1 && d < T.pond.r + 4;
+    });
+  }
+}
+
+/** 광맥 지대의 바위들: 흔한 금속일수록 많이, 귀한 것일수록 적게 */
+function placeVeins(w: WorldState, T: Terrain) {
+  const M = T.mine;
+  const spots: { x: number; z: number }[] = w.rocks.map((r) => ({ x: r.x, z: r.z }));
+  const order = [...METALS].sort((a, b) => METAL_INFO[a].veins - METAL_INFO[b].veins);
+  for (const m of order) {
+    // 귀한 것은 언덕 한가운데 깊숙이
+    const reach = M.r * (METAL_INFO[m].veins <= 2 ? 0.45 : 0.85);
+    for (let i = 0, guard = 0; i < METAL_INFO[m].veins && guard < 600; guard++) {
+      const a = rand(w) * Math.PI * 2, d = Math.sqrt(rand(w)) * reach;
+      const x = M.x + Math.cos(a) * d, z = M.z + Math.sin(a) * d;
+      if (!T.isLand(x, z) || T.height(x, z) < 1.4 || !spacedOk(spots, x, z, 2.5)) continue;
+      spots.push({ x, z });
+      w.rocks.push(makeRock(w, "vein", x, z, m));
+      i++;
+    }
+  }
 }
 
 const isBigPlant = (k: PlantKind) => k === "palm" || k === "tree" || k === "pine" || k === "fruit";
@@ -323,7 +354,7 @@ function plantFlora(w: WorldState, T: Terrain, D: number, avoid?: (x: number, z:
   const small: { x: number; z: number }[] = [];
   for (const p of w.plants) (isBigPlant(p.kind) ? big : small).push(p);
   const R = ISLAND_RADIUS * 1.25;
-  for (let k = 0; k < 4200; k++) {
+  for (let k = 0, n = Math.round(4200 * AREA_MUL); k < n; k++) {
     const x = range(w, -R, R), z = range(w, -R, R);
     const b = T.biome(x, z);
     const h = T.height(x, z);
@@ -404,6 +435,12 @@ export function migrateWorld(w: WorldState) {
   w.voyages ??= [];
   w.deposits ??= makeDeposits(w, T);
   w.timers.disaster ??= w.time + 10 * DAY;
+  w.beasts ??= [];
+  w.morale ??= 70;
+  w.designs ??= [...new Set(w.structures.filter((s) => s.prog >= 1).map((s) => `${s.type}:${s.lv ?? 1}`))];
+  w.timers.beast ??= w.time + 3 * DAY;
+  w.history.beast ??= 0;
+  w.history.lastBeast ??= 0;
   for (const p of w.people) {
     p.ill ??= 0;
     p.group ??= null;
@@ -417,14 +454,57 @@ export function migrateWorld(w: WorldState) {
   }
   if (old) {
     // 동식물을 새 기준(1.7배)에 맞춰 한 번 더 채운다
-    const busy = (x: number, z: number) => dist(x, z, w.camp.x, w.camp.z) < 9 || w.structures.some((s) => dist(x, z, s.x, s.z) < 4);
+    const busy = (x: number, z: number) => !T.wasLand(x, z) || dist(x, z, w.camp.x, w.camp.z) < 9 || w.structures.some((s) => dist(x, z, s.x, s.z) < 4);
     plantFlora(w, T, 0.7, busy);
     spawnFauna(w, T, 0.7);
     for (let n = 0; n < 7; ) n += spawnFish(w, T) || 1;
     w.rev++;
   }
+  if ((w.v ?? 1) < 3) widenIsland(w, T);
   w.v = SCHEMA_VERSION;
   return w;
+}
+
+/** 섬이 두 배로 넓어졌다: 새 땅에 숲과 짐승, 바위와 광맥을 채우고 바닷가 시설은 새 해안으로 옮긴다 */
+function widenIsland(w: WorldState, T: Terrain) {
+  const old = (x: number, z: number) => T.wasLand(x, z);
+  plantFlora(w, T, 1.7, old);
+  placeRocks(w, T, old, AREA_MUL - 1);
+  placeVeins(w, T);
+  spawnFauna(w, T, 1.7 * (AREA_MUL - 1));
+  // 예전 바닷가는 이제 뭍이다
+  w.structures = w.structures.filter((s) => s.type !== "raft");
+  for (const s of w.structures) {
+    if (s.type !== "dock" && s.type !== "seawall" && s.type !== "shipyard" && s.type !== "lighthouse") continue;
+    const a = Math.atan2(s.z, s.x);
+    const side = s.type === "dock" ? -0.4 : s.type === "shipyard" ? 0.6 : s.type === "seawall" ? 1.6 : 3.5;
+    const sp = T.shorePoint(a, side);
+    s.x = sp.x;
+    s.z = sp.z;
+    s.rot = a;
+    const r = STRUCTS[s.type].radius + 0.5;
+    w.plants = w.plants.filter((p) => dist(p.x, p.z, s.x, s.z) > r);
+  }
+  for (const v of w.voyages) {
+    const yard = w.structures.find((s) => s.type === (v.via === "ship" ? "shipyard" : "portal"));
+    if (yard) v.from = { x: yard.x + Math.cos(yard.rot) * 3.2, z: yard.z + Math.sin(yard.rot) * 3.2, rot: yard.rot };
+  }
+  // 뭍이 된 곳의 물고기는 새 바다로, 게는 새 모래밭으로
+  const before = w.fish.length;
+  w.fish = w.fish.filter((f) => {
+    const [d0, d1] = FISH_INFO[f.kind]?.depth ?? [0.5, 4];
+    const h = T.height(f.x, f.z);
+    return h < -d0 * 0.6 && h > -d1 * 1.5;
+  });
+  for (let n = w.fish.length; n < Math.max(before, 26); ) n += spawnFish(w, T) || 1;
+  for (const a of w.animals) {
+    if (a.kind !== "crab" || T.biome(a.x, a.z) === "beach") continue;
+    const sp = T.shorePoint(Math.atan2(a.z, a.x), 1.2);
+    a.x = a.tx = sp.x;
+    a.z = a.tz = sp.z;
+  }
+  chron(w, "misc", "바닷물이 물러나며 섬이 두 배로 넓어졌다. 새로 드러난 땅 한쪽에는 낯선 바위 언덕이 솟아 있다.");
+  w.rev++;
 }
 
 /** 해변에 사람을 하나 떠밀려오게 하고, 처음이라면 야영지 위치도 정한다 */

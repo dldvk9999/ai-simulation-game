@@ -35,7 +35,10 @@ const eyeMat = flat("#1d1d1f");
 const blushMat = new THREE.MeshBasicMaterial({ color: "#ff8fa3", transparent: true, opacity: 0.7 });
 const ringGeo = new THREE.RingGeometry(0.5, 0.62, 24);
 const ringMat = new THREE.MeshBasicMaterial({ color: "#fff6c2", transparent: true, opacity: 0.85, depthWrite: false });
-const toolMats = { wood: flat("#8a5f3d"), stone: flat("#8c877f"), string: flat("#e8e2d0") };
+const toolMats = {
+  wood: flat("#8a5f3d"), stone: flat("#8c877f"), string: flat("#e8e2d0"),
+  bronze: flat("#c8913a", { metalness: 0.4, roughness: 0.5 }), iron: flat("#a3abb3", { metalness: 0.5, roughness: 0.45 }), gun: flat("#34363b", { metalness: 0.3 }),
+};
 
 const CARRY_COLOR: Record<string, string> = {
   wood: "#8a5a3b", stick: "#9b6b45", stone: "#9b968e", fiber: "#bcd46a", clay: "#b0664a", ore: "#5d5753", herb: "#9a7ad6",
@@ -292,6 +295,33 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
         aR = 2.3; aRx = -0.5;
         break;
       }
+      case "aim": {
+        // 활이나 총을 겨눈다
+        aR = 1.55; aL = 1.5; aLx = -0.42; aRx = 0.05; tz = -0.04; hz = -0.05;
+        const sub = p.act?.sub;
+        const guns = w.stock.rifle || w.stock.musket;
+        tool = sub === "musket" || sub === "rifle" || (sub === "tower" && guns) ? "gun" : "bow";
+        if (Math.sin(t * 2.2 + p.id) > 0.92) { aR = 1.3; tx = -0.06; }
+        break;
+      }
+      case "slash": {
+        // 창을 찌르고 검을 휘두른다
+        const k = Math.max(0, s(t * 8 + p.id));
+        lL = 0.45; lR = -0.3; tz = -0.18 - k * 0.15;
+        aR = 1.1 + k * 1.7; aRx = 0.1 - k * 0.3; aL = 0.9; aLx = -0.3;
+        by = Math.abs(s(t * 4)) * 0.04;
+        const sub = p.act?.sub;
+        tool = sub === "sword" ? "sword" : sub === "ironsword" ? "ironsword" : sub === "spear" ? "spear" : "";
+        break;
+      }
+      case "mine": {
+        // 곡괭이로 광맥을 내리찍는다
+        const k = (s(t * 5.5) + 1) / 2;
+        aL = aR = 1.4 + k * 1.7; aLx = -0.12; aRx = 0.12;
+        tz = -0.15 - (1 - k) * 0.35; lL = lR = 0.15;
+        tool = "pickaxe";
+        break;
+      }
       case "fight": {
         // 주먹을 번갈아 내지른다
         const k = s(t * 10);
@@ -421,6 +451,29 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
               </group>
               <group ref={tools("stick")} visible={false} rotation-z={Math.PI / 2}>
                 <mesh geometry={box} material={toolMats.wood} scale={[0.03, 0.6, 0.03]} position-y={0.15} />
+              </group>
+              <group ref={tools("sword")} visible={false} rotation-z={Math.PI / 2}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.04, 0.18, 0.04]} position-y={0.02} />
+                <mesh geometry={box} material={toolMats.bronze} scale={[0.04, 0.05, 0.2]} position-y={0.12} />
+                <mesh geometry={box} material={toolMats.bronze} scale={[0.025, 0.7, 0.07]} position-y={0.48} />
+              </group>
+              <group ref={tools("ironsword")} visible={false} rotation-z={Math.PI / 2}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.04, 1.9, 0.04]} position-y={0.3} />
+                <mesh geometry={box} material={toolMats.iron} scale={[0.03, 0.34, 0.1]} position-y={1.38} />
+              </group>
+              <group ref={tools("bow")} visible={false} rotation-x={0}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.035, 0.5, 0.035]} position={[0.1, 0.25, 0]} rotation-z={-0.35} />
+                <mesh geometry={box} material={toolMats.wood} scale={[0.035, 0.5, 0.035]} position={[0.1, -0.2, 0]} rotation-z={0.35} />
+                <mesh geometry={box} material={toolMats.string} scale={[0.008, 0.88, 0.008]} position={[-0.02, 0.03, 0]} />
+                <mesh geometry={box} material={toolMats.wood} scale={[0.6, 0.02, 0.02]} position={[0.2, 0.03, 0]} />
+              </group>
+              <group ref={tools("gun")} visible={false} rotation-z={Math.PI / 2}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.07, 0.42, 0.09]} position-y={-0.05} />
+                <mesh geometry={box} material={toolMats.gun} scale={[0.045, 1.0, 0.045]} position-y={0.6} />
+              </group>
+              <group ref={tools("pickaxe")} visible={false} rotation-z={Math.PI / 2}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.04, 0.7, 0.04]} position-y={0.15} />
+                <mesh geometry={box} material={toolMats.iron} scale={[0.06, 0.07, 0.46]} position={[0.02, 0.48, 0]} rotation-x={0.2} />
               </group>
             </group>
           </group>
