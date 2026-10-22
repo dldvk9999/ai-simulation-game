@@ -49,9 +49,9 @@ export const STRIKE_EVERY = 50;
 
 /** 하루에 한 번: 오늘 맹수가 올지 정한다 (저녁과 밤에 더 자주) */
 export function dailyBeasts(w: WorldState) {
-  if (w.time < (w.timers.beast ?? 0) || w.timers.beastAt || w.time < 12 * DAY) return;
+  if (w.time < (w.timers.beast ?? 0) || w.timers.beastAt || w.time < 18 * DAY) return;
   // 사람이 몇 모여 살기 시작해야 맹수의 눈에 띈다
-  if (w.beasts.some((b) => b.st !== "dead") || living(w).length < 3) return;
+  if (w.beasts.some((b) => b.st !== "dead") || living(w).length < 4) return;
   if (!chance(w, DAILY_CHANCE)) return;
   const h = chance(w, 0.6) ? range(w, 18, 23.5) : range(w, 6, 18);
   w.timers.beastAt = w.time + h * HOUR;
@@ -287,7 +287,7 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
   const speed = WALK_SPEED * BEAST_INFO[b.kind].speed;
   // 다쳤거나 오래 헤매면 숲으로 돌아간다
   const crowd = b.hp < b.max * 0.45 && w.people.filter((q) => onIsland(q) && !lying(q) && age(w, q) >= 16 && q.health > 30 && dist(q.x, q.z, b.x, b.z) < 7).length >= 3;
-  if (b.st !== "leave" && (w.time >= b.until || b.hp < b.max * 0.3 || crowd)) {
+  if (b.st !== "leave" && (w.time >= b.until || b.hp < b.max * 0.3 || crowd || (b.bored ?? 0) > 2 * HOUR)) {
     const hurt = b.hp < b.max * 0.45;
     b.st = "leave";
     b.target = null;
@@ -311,7 +311,7 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
   alarm(w, b);
 
   let tgt: Person | null | undefined = findById(w.people, b.target);
-  if (!tgt || !onIsland(tgt) || safeFromBeast(w, tgt) || dist(b.x, b.z, tgt.x, tgt.z) > 40 || T.height(tgt.x, tgt.z) < 0.1) tgt = pickTarget(w, T, b);
+  if (!tgt || !onIsland(tgt) || downed(tgt) || safeFromBeast(w, tgt) || dist(b.x, b.z, tgt.x, tgt.z) > 40 || T.height(tgt.x, tgt.z) < 0.1) tgt = pickTarget(w, T, b);
   b.target = tgt?.id ?? null;
   if (tgt) {
     b.siege = null;
@@ -327,10 +327,12 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
       if (b.atk <= 0 && canBite()) {
         b.atk = BITE_EVERY;
         bite(w, T, b, tgt);
+        b.bored = Math.max(0, (b.bored ?? 0) - 20 * MIN);
       }
     }
     return;
   }
+  b.bored = (b.bored ?? 0) + dt;
   // 숨은 사람이 있는 집을 부수려 든다 (곰부터는 힘이 세다)
   const house = b.pow >= 2.8 ? siegeTarget(w, b) : null;
   if (house) {
@@ -347,11 +349,14 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
       b.atk -= dt;
       if (b.atk <= 0 && canBite()) {
         b.atk = BITE_EVERY;
-        harm(w, T, house, (biteOf(b) * 0.8) / maxHp(house), "beast");
+        harm(w, T, house, (biteOf(b) * 0.3) / maxHp(house), "beast");
         addFx(w, "bite", house.x, house.z, house.id);
+        const broken = !usable(house);
         for (const q of living(w)) if (dist(q.x, q.z, house.x, house.z) < STRUCTS[house.type].radius + 3) {
           wake(w, q);
           feel(w, q, "fear", 0.15, false);
+          // 벽이 뚫리면 다른 곳으로 피한다
+          if (broken && (q.act?.k === "hide" || q.act?.k === "sleep" || q.act?.k === "rest")) q.act = null;
         }
       }
     }
@@ -372,15 +377,19 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
 }
 
 /** 가장 노리기 좋은 사람: 가깝고, 약하고, 홀로 있는 사람. 덤벼든 사람에게도 이를 드러낸다 */
+/** 정신을 잃고 쓰러진 사람은 더 건드리지 않는다 */
+const downed = (p: Person) => p.act?.k === "unconscious";
+
 function pickTarget(w: WorldState, T: Terrain, b: Beast) {
   let best: Person | null = null;
   let bs = Infinity;
   for (const p of w.people) {
     if (!onIsland(p)) continue;
     const d = dist(b.x, b.z, p.x, p.z);
-    if (d > (p.id === b.target ? 34 : 26) || T.height(p.x, p.z) < 0.1 || safeFromBeast(w, p)) continue;
+    if (d > (p.id === b.target ? 34 : 26) || T.height(p.x, p.z) < 0.1 || downed(p) || safeFromBeast(w, p)) continue;
     const yrs = age(w, p);
-    const s = d - (yrs < 12 ? 5 : 0) - (yrs > 64 ? 3 : 0) - ((p.ill ?? 0) >= 2 ? 3 : 0) - (b.foes.includes(p.id) ? 6 : 0) - (p.act?.k === "defend" && p.act.tid === b.id ? 4 : 0);
+    if (yrs < 3) continue;
+    const s = d - (yrs > 64 ? 2 : 0) - ((p.ill ?? 0) >= 2 ? 2 : 0) - (b.foes.includes(p.id) ? 6 : 0) - (p.act?.k === "defend" && p.act.tid === b.id ? 4 : 0);
     if (s < bs) {
       bs = s;
       best = p;
@@ -413,6 +422,7 @@ function bite(w: WorldState, T: Terrain, b: Beast, p: Person) {
   addFx(w, "bite", p.x, p.z, p.id);
   feel(w, p, "fear", 0.5);
   p.seen.reeval = 0;
+  if (p.act && p.act.k !== "defend" && p.act.k !== "unconscious") p.act = null;
   // 비명에 곁에서 자던 사람도 깬다
   for (const q of living(w)) if (dist(q.x, q.z, p.x, p.z) < 10) wake(w, q);
   const name = BEAST_INFO[b.kind].name;
@@ -424,9 +434,12 @@ function bite(w: WorldState, T: Terrain, b: Beast, p: Person) {
   }
   say(w, p, "bitten", { beast: name }, "🩸", true);
   shiftMorale(w, -1.5);
-  if (p.health < 45 && !lying(p) && chance(w, 0.3)) {
-    p.act = { k: "unconscious", ph: 1, tx: p.x, tz: p.z, t: range(w, 15, 30) * MIN, started: w.time };
+  if (p.health < 35 && !lying(p)) {
+    p.act = { k: "unconscious", ph: 1, tx: p.x, tz: p.z, t: range(w, 20, 40) * MIN, started: w.time };
     p.anim = "lie";
+    b.target = null;
+    chron(w, "beast", `${josa(p.name, "이/가")} ${name}에게 물려 크게 다치고 쓰러졌다.`);
+    shiftMorale(w, -2);
   }
   // 지금 무기로는 버겁다는 것을 깨닫는다
   if (p.act?.k === "defend" && p.health < 40 && w.time - (w.timers.weaponGap ?? -1e9) > 10 * DAY) {

@@ -242,7 +242,8 @@ function track(w: WorldState, p: Person, a: Act) {
     }
     if (a.sub !== "tower") {
       const r = weaponOf(a.sub).range;
-      if (dist(p.x, p.z, b.x, b.z) <= r) {
+      const d = dist(p.x, p.z, b.x, b.z);
+      if (d <= r && (r < 3 || d >= r * 0.45)) {
         arrive(w, null, p, a);
         return false;
       }
@@ -564,8 +565,8 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
       }
       const reach = tower ? towerRange(tower) : weaponOf(a.sub).range + 0.6;
       const d = dist(tower?.x ?? p.x, tower?.z ?? p.z, b.x, b.z);
-      if (!tower && d > reach + 0.8) {
-        // 다시 다가간다
+      if (!tower && (d > reach + 0.8 || (reach > 3 && d < reach * 0.35))) {
+        // 다시 다가가거나, 활·총이면 거리를 벌린다
         a.ph = 0;
         break;
       }
@@ -1783,10 +1784,13 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const able = yrs >= 16 && yrs <= 62 && p.health > 40 && lv < 2 && !p.preg;
     const fighting = w.people.filter((q) => q.act?.k === "defend" && q.act.tid === bst.id).length;
     const most = Math.max(2, Math.ceil(ctx.adults * 0.6));
+    const others = w.people.filter((q) => q !== p && onIsland(q) && !lying(q) && age(w, q) >= 16 && age(w, q) <= 62 && q.health > 40).length;
     if (able && fighting < most) {
       const odds = (teamPower(w, Math.min(most, ctx.adults)) * 6) / Math.max(1, bst.hp);
       const wp = pickWeapon(w);
-      const s = 1.0 + (1 - N) * 0.35 - p.emo.fear * 0.25 + wp.dmg / 120 + (odds < 1 ? -0.7 : odds > 2 ? 0.15 : 0);
+      const prey = findById(w.people, bst.target);
+      const kin = !!prey && (prey.parents.includes(p.id) || prey.id === p.partner || age(w, prey) < 12);
+      const s = 1.0 + (1 - N) * 0.35 - p.emo.fear * 0.25 + wp.dmg / 120 + (odds < 1 ? (kin || bst.siege != null ? -0.25 : -0.7) : odds > 2 ? 0.15 : 0) + (kin ? 0.3 : 0) - (fighting === 0 && others === 0 && odds < 2.5 ? 0.6 : 0);
       add("defend", s, () => defendPlan(w, p, bst));
     }
     add("hide", 0.92 + p.emo.fear * 0.3 + (kid || elder || lv >= 2 ? 0.8 : 0) + (able ? 0 : 0.3), () => hidePlan(w, ctx, p, bst));

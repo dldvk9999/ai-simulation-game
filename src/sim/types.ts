@@ -333,6 +333,8 @@ export interface Beast {
   gone?: number;
   /** 맞서 싸운 사람들 */
   foes: number[];
+  /** 아무도 물지 못하고 헛걸음한 시간 (오래되면 제풀에 물러난다) */
+  bored?: number;
 }
 
 export type ChronicleKind =

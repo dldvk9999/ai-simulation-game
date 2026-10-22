@@ -511,7 +511,9 @@ function Toasts() {
 
 function Hint() {
   const hint = useHud((s) => s.hint);
-  const covered = useHud((s) => s.panel !== "none" || s.selected != null);
+  const covered = useHud((s) => s.panel !== "none" || s.selected != null || s.structure != null);
+  // 건물 카드가 열려 있으면 그 위로 올린다
+  const raised = useHud((s) => s.structure != null && s.selected == null);
   const touch = useTouch();
   const [show, setShow] = useState(true);
   useEffect(() => {
@@ -526,7 +528,7 @@ function Hint() {
   // 패널이나 인물 카드가 열려 있으면 그 위에 겹치지 않게 숨긴다
   if (covered && !hint) return null;
   return (
-    <div className="hint-wrap">
+    <div className={`hint-wrap ${raised ? "raised" : ""}`}>
       {hint && <div className="hint">{hint}</div>}
       {show && !hint && (
         <div className="hint soft">

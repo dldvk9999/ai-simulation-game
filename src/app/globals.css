@@ -902,6 +902,8 @@ button {
   .person { left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 46vh; overflow-y: auto; }
   .toasts { width: calc(100vw - 28px); top: 150px; }
   .hint-wrap { max-width: calc(100vw - 28px); bottom: 18px; }
+  /* 건물 카드가 열려 있으면 알림을 그 위로 */
+  .hint-wrap.raised { bottom: 232px; }
   .status { min-width: 0; }
 }
 
