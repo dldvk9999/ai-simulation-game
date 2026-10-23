@@ -6,16 +6,17 @@ import { getStore } from "./storage";
 export const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
-export function worldIdFor(key: string) {
+/** 시드 → 섬 id. 소금값 환경 변수 이름(ISLAND_KEY_SALT)은 이미 배포된 섬을 찾아야 해서 그대로 둔다 */
+export function worldIdFor(seed: string) {
   const salt = process.env.ISLAND_KEY_SALT ?? "lonely-island";
-  return createHash("sha256").update(`${salt}:${key}`).digest("hex").slice(0, 40);
+  return createHash("sha256").update(`${salt}:${seed}`).digest("hex").slice(0, 40);
 }
 
-export function normalizeKey(raw: unknown) {
+export function normalizeSeed(raw: unknown) {
   if (typeof raw !== "string") return null;
-  const key = raw.trim().normalize("NFC");
-  if (key.length < 1 || key.length > 64) return null;
-  return key;
+  const seed = raw.trim().normalize("NFC");
+  if (seed.length < 1 || seed.length > 64) return null;
+  return seed;
 }
 
 export const validId = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);

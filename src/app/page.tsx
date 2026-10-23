@@ -1,5 +1,5 @@
-import KeyGate from "@/components/KeyGate";
+import SeedGate from "@/components/SeedGate";
 
 export default function Home() {
-  return <KeyGate />;
+  return <SeedGate />;
 }

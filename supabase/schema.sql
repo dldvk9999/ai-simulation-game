@@ -1,7 +1,7 @@
 -- 무인도 시뮬레이션 저장소 스키마
 -- Supabase 대시보드 → SQL Editor 에 붙여 넣고 Run 하세요.
 
--- 섬(월드) 상태. id 는 입력한 키의 해시(sha256 앞 40자)라서 키 원문은 저장하지 않습니다.
+-- 섬(월드) 상태. id 는 입력한 시드의 해시(sha256 앞 40자)라서 시드 원문은 저장하지 않습니다.
 create table if not exists public.worlds (
   id          text primary key,
   state       jsonb not null,

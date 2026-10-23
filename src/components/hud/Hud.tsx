@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { InstallButton } from "@/components/InstallButton";
 import { useHud, type GroupSummary, type PersonSummary } from "@/game/hud";
 import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
@@ -120,6 +121,7 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
             {m.icon}
           </button>
         ))}
+        <InstallButton kind="tool" />
         <button onClick={mute} title="소리">{s.muted ? "🔇" : "🔊"}</button>
         <button onClick={exit} title="나가기">🚪</button>
       </div>
@@ -146,6 +148,7 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
                 {m.label}
               </button>
             ))}
+            <InstallButton kind="menu" onPick={() => setMenu(false)} />
             <button onClick={mute}>
               <span>{s.muted ? "🔇" : "🔊"}</span>
               {s.muted ? "소리 켜기" : "소리 끄기"}
@@ -490,7 +493,7 @@ function Help() {
         <li>🌀 아주 드물게 지진·태풍·쓰나미가 찾아와요. 사람들은 함께 고치고, 모여서 대비책을 궁리해요.</li>
         <li>🏳️ {GROUP_POP}명이 넘으면 뜻이 맞는 사람끼리 조직을, 모두의 뜻이 맞으면 문명을 세워요. 저마다 역할을 맡지만, 뜻이 너무 다르면 다투다 갈라서기도 해요.</li>
         <li>⛵ 과학 시대에 이르면 큰 배나 차원문을 만들어 섬 밖 세상에 다녀와요.</li>
-        <li>👁 같은 키로 최대 {MAX_VIEWERS}명이 함께 지켜볼 수 있어요.</li>
+        <li>👁 같은 시드로 최대 {MAX_VIEWERS}명이 함께 지켜볼 수 있어요.</li>
       </ul>
     </>
   );
