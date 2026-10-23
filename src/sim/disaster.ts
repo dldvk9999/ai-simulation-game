@@ -3,7 +3,7 @@
 import { DAY, HOUR, MIN } from "./constants";
 import { seasonOf } from "./clock";
 import { harm } from "./building";
-import { STRUCTS } from "./data";
+import { STRUCTS, WOODEN } from "./data";
 import { clamp } from "./noise";
 import { isTree } from "./ecology";
 import { feel, lying, say } from "./people";
@@ -33,7 +33,6 @@ const WIND: Partial<Record<StructureType, number>> = {
   lighthouse: 0.05, observatory: 0.08, kiln: 0.08, smelter: 0.05,
   watchtower: 0.35, fort: 0.04, battery: 0.04, townhouse: 0.05, apartment: 0.06, forge: 0.1, factory: 0.08, mine: 0.2,
 };
-const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard", "watchtower", "mine"]);
 const SPARED = new Set<StructureType>(["grave", "raft", "campfire", "banner"]);
 
 /** 대비책을 알면 덜 부서진다 */

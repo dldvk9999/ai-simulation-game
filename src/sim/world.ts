@@ -275,6 +275,7 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     beasts: [],
     morale: 70,
     designs: [],
+    blazes: [],
   };
 
   // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
@@ -441,6 +442,9 @@ export function migrateWorld(w: WorldState) {
   w.timers.beast ??= w.time + 3 * DAY;
   w.history.beast ??= 0;
   w.history.lastBeast ??= 0;
+  w.blazes ??= [];
+  w.history.fire ??= 0;
+  w.history.lastFire ??= 0;
   for (const p of w.people) {
     p.ill ??= 0;
     p.group ??= null;

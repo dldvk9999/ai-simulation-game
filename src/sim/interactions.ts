@@ -4,6 +4,7 @@ import { smash } from "./building";
 import { TIME_SCALE } from "./constants";
 import { METAL_INFO, TECH_BY_ID } from "./data";
 import { isTree } from "./ecology";
+import { sparkNear } from "./fire";
 import { feel, lying, say } from "./people";
 import { chance, range } from "./rng";
 import { addResearch } from "./settlement";
@@ -178,6 +179,8 @@ function ignite(w: WorldState, T: Terrain, i: Interaction) {
   fire.fuel = Math.min(100, Math.max(fire.fuel, 0) + fuel);
   addFx(w, "ignite", fire.x, fire.z, fire.id);
   bump(w);
+  // 바로 곁의 나무 건물에 옮겨붙을 수 있다
+  sparkNear(w, fire.x, fire.z);
   if (wasLit) return;
 
   const unknown = !knows(w, "fire");

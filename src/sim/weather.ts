@@ -3,6 +3,8 @@ import { baseTemp, seasonOf } from "./clock";
 import { chance, range, rand, weighted } from "./rng";
 import type { Terrain } from "./terrain";
 import type { WeatherType, WorldState } from "./types";
+import { burnable, igniteStructure, startWildfire } from "./fire";
+import { heightOf } from "./building";
 import { addFx, bump, chron, knows, nearest } from "./world";
 
 // 계절별 날씨 가중치. 어느 계절이든 맑음이 가장 자주 나온다.
@@ -85,7 +87,15 @@ function strike(w: WorldState, T: Terrain) {
   // 높은 나무에 떨어지면 불이 붙는다
   let x = 0, z = 0;
   let ref: number | undefined;
-  if (chance(w, 0.22)) {
+  // 아주 가끔은 마을에서 가장 높은 건물에 떨어진다
+  const tall = w.structures.filter((s) => s.prog >= 1 && heightOf(s) >= 5);
+  if (tall.length && chance(w, 0.006)) {
+    const s = tall.reduce((m, x) => (heightOf(x) > heightOf(m) ? x : m), tall[0]);
+    x = s.x;
+    z = s.z;
+    ref = s.id;
+    if (burnable(s) && chance(w, s.fp ? 0.15 : 0.6)) igniteStructure(w, s, "lightning");
+  } else if (chance(w, 0.22)) {
     const cx = range(w, -50, 50), cz = range(w, -50, 50);
     const tree = nearest(w.plants, cx, cz, (p) => (p.kind === "tree" || p.kind === "pine" || p.kind === "palm") && p.g >= 1 && !p.stump && !p.burn, 30);
     if (tree) {
@@ -104,6 +114,9 @@ function strike(w: WorldState, T: Terrain) {
     const p = T.randomPoint(w, () => true, 5) ?? { x: range(w, -60, 60), z: range(w, -60, 60) };
     x = p.x;
     z = p.z;
+    // 낮은 확률로 땅에 불길이 인다 (풀밭과 숲에서만)
+    const b = T.biome(x, z);
+    if ((b === "grass" || b === "forest") && chance(w, 0.04)) startWildfire(w, T, x, z);
   }
   addFx(w, "lightning", x, z, ref, rand(w));
   for (const p of w.people) {

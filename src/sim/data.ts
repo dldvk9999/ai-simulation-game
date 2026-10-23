@@ -12,7 +12,7 @@ export interface TechDef {
   /** 모두가 죽어도 이 흔적이 남아 있으면 다음 사람이 알아본다 */
   evidence?: StructureType | Res;
   /** 겪거나 찾아내야 비로소 고민하기 시작한다 */
-  needs?: { found?: string[]; event?: ("quake" | "typhoon" | "tsunami" | "sick" | "beast")[] };
+  needs?: { found?: string[]; event?: ("quake" | "typhoon" | "tsunami" | "sick" | "beast" | "fire")[] };
 }
 
 export const TECHS: TechDef[] = [
@@ -49,6 +49,7 @@ export const TECHS: TechDef[] = [
   { id: "writing", name: "문자", era: 2, cost: 1000, prereq: ["pottery", "agriculture"], desc: "지식을 기록해 후대에 남긴다.", evidence: "library" },
   { id: "boat", name: "배", era: 2, cost: 800, prereq: ["loghouse", "cordage"], desc: "먼 바다에서 고기를 잡는다.", evidence: "dock" },
   { id: "bronzeweapon", name: "청동 무기", era: 2, cost: 650, prereq: ["metallurgy"], desc: "구리와 주석을 녹여 섞은 청동으로 날카로운 검을 벼린다.", evidence: "sword", needs: { found: ["copper", "tin"], event: ["beast"] } },
+  { id: "fireproof", name: "불에 강한 건축", era: 2, cost: 700, prereq: ["metallurgy"], desc: "구운 기와로 지붕을 잇고 흙과 석회를 바른 벽으로, 불길이 쉽게 옮겨붙지 않는 집을 짓는다.", needs: { event: ["fire"] } },
   { id: "goldsmith", name: "귀금속 세공", era: 2, cost: 600, prereq: ["metallurgy"], desc: "은과 금을 다듬어 장신구를 만든다. 반짝이는 것을 몸에 지니면 마음이 든든해진다.", evidence: "jewelry", needs: { found: ["silver"] } },
 
   { id: "iron", name: "철기", era: 3, cost: 1500, prereq: ["metallurgy"], desc: "단단한 철로 도구를 만든다." },
@@ -150,6 +151,8 @@ export const HOUSE_TYPES: StructureType[] = ["leanto", "hut", "loghouse", "stone
 /** 층을 쌓는 건물 */
 export const STORIED = new Set<StructureType>(["townhouse", "apartment", "watchtower", "fort", "factory"]);
 /** 설계 없이 바로 짓는 작은 것들 */
+/** 나무로 지어 불이 붙고 바람·지진에 약한 건물 */
+export const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard", "watchtower", "mine"]);
 export const NO_DESIGN = new Set<StructureType>(["campfire", "grave", "raft", "banner", "farm", "bench", "leanto", "rack", "pen"]);
 
 export interface Recipe {

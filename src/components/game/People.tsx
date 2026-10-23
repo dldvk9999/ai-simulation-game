@@ -38,7 +38,10 @@ const ringMat = new THREE.MeshBasicMaterial({ color: "#fff6c2", transparent: tru
 const toolMats = {
   wood: flat("#8a5f3d"), stone: flat("#8c877f"), string: flat("#e8e2d0"),
   bronze: flat("#c8913a", { metalness: 0.4, roughness: 0.5 }), iron: flat("#a3abb3", { metalness: 0.5, roughness: 0.45 }), gun: flat("#34363b", { metalness: 0.3 }),
+  water: new THREE.MeshStandardMaterial({ color: "#5fb4e8", transparent: true, opacity: 0.85, roughness: 0.2 }),
 };
+/** 아기를 안고 있어도 팔을 모아 품을 수 있는 동작 */
+const CRADLE = new Set(["walk", "run", "idle", "talk", "carry", "sit", "startle", "cower", "hug"]);
 
 const CARRY_COLOR: Record<string, string> = {
   wood: "#8a5a3b", stick: "#9b6b45", stone: "#9b968e", fiber: "#bcd46a", clay: "#b0664a", ore: "#5d5753", herb: "#9a7ad6",
@@ -142,7 +145,10 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     // 물 위에 있는데 헤엄치는 중이 아니면 배를 타고 있다
     const onBoat = !!p.alive && ground < -0.35 && !(p.act?.k === "leisure" && p.act.sub === "swim");
     r.boat.visible = onBoat;
-    r.root.position.set(disp.current.x, onBoat ? 0.14 + Math.sin(t * 1.3) * 0.05 : Math.max(ground, -0.55), disp.current.z);
+    // 품에 안긴 아기는 안은 사람의 가슴 높이에 (앉아 있으면 무릎 위)
+    const holder = p.act?.k === "carried" ? findById(w.people, p.act.tid) : undefined;
+    const lap = holder ? (holder.anim === "sit" || holder.anim === "talk" ? 0.25 : 0.72) * (0.42 + 0.58 * Math.min(1, ageYears(holder.birth, w.time) / 16)) : 0;
+    r.root.position.set(disp.current.x, onBoat ? 0.14 + Math.sin(t * 1.3) * 0.05 : Math.max(ground, -0.55) + lap, disp.current.z);
     r.root.rotation.y = -disp.current.r;
     r.root.scale.setScalar(scale);
 
@@ -154,6 +160,71 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     const anim = p.alive ? p.anim : "lie";
     const s = Math.sin;
     switch (anim) {
+      case "held": {
+        // 안겨서 두리번거린다
+        by = -0.45; lL = lR = 1.4; aL = aR = 1.2; aLx = -0.3; aRx = 0.3;
+        hy = s(t * 0.6) * 0.5; hz = 0.1;
+        break;
+      }
+      case "crawl": {
+        const k = s(t * 7);
+        tz = -1.3; by = -0.55; hz = 1.0;
+        aL = 1.45 + k * 0.3; aR = 1.45 - k * 0.3;
+        lL = 1.5 - k * 0.25; lR = 1.5 + k * 0.25;
+        break;
+      }
+      case "cry": {
+        // 두 손으로 눈을 비비며 어깨를 들썩인다
+        hz = -0.35; aL = aR = 2.55; aLx = -0.55; aRx = 0.55;
+        by = Math.abs(s(t * 12)) * 0.025; tx = s(t * 10) * 0.05; eyes = 0.25;
+        break;
+      }
+      case "tantrum": {
+        // 발을 구르고 팔을 마구 휘두른다
+        const k = s(t * 16);
+        lL = Math.max(0, k) * 0.7; lR = Math.max(0, -k) * 0.7;
+        aL = 1.9 + s(t * 15) * 1.0; aR = 1.9 - s(t * 15) * 1.0; aLx = -0.5; aRx = 0.5;
+        hz = 0.3; tx = s(t * 8) * 0.12; by = Math.abs(k) * 0.06; eyes = 0.3;
+        break;
+      }
+      case "beg": {
+        // 두 팔을 뻗어 올려 달라고 조른다
+        aL = aR = 2.3 + s(t * 6) * 0.25; aLx = -0.2; aRx = 0.2;
+        by = Math.abs(s(t * 6)) * 0.05; hz = 0.35;
+        break;
+      }
+      case "hug": {
+        aL = aR = 1.5; aLx = 0.45; aRx = -0.45; tz = -0.1; tx = s(t * 2) * 0.06;
+        break;
+      }
+      case "scold": {
+        // 한 손은 허리에, 한 손가락은 까딱까딱
+        aR = 2.0 + s(t * 9) * 0.15; aRx = 0.1 + s(t * 9) * 0.1;
+        aL = 0.6; aLx = -0.9; hz = -0.2; tz = -0.08;
+        break;
+      }
+      case "scoop": {
+        tz = -0.85; lL = lR = 0.3; by = -0.06;
+        aL = 0.9; aR = 1.0 + s(t * 3) * 0.2;
+        tool = "bucket";
+        break;
+      }
+      case "bucket": {
+        // 물 양동이를 들고 뛴다
+        const k = s(t * 12);
+        lL = k * 0.8; lR = -k * 0.8; aL = -k * 0.7; aR = 0.12;
+        by = Math.abs(k) * 0.06; tz = -0.12;
+        tool = "bucket";
+        break;
+      }
+      case "douse": {
+        // 불길에 물을 확 끼얹는다
+        const k = (t * 1.6) % 1;
+        aL = aR = k < 0.6 ? 0.4 + k * 3 : 2.2 - (k - 0.6) * 4.5;
+        aLx = -0.15; aRx = 0.15; tz = -0.15 + (k < 0.6 ? 0 : 0.15);
+        tool = "bucket";
+        break;
+      }
       case "walk": case "carry": {
         const k = s(t * 9);
         lL = k * 0.55; lR = -k * 0.55;
@@ -339,6 +410,9 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
       }
     }
 
+    if (p.alive && CRADLE.has(anim) && w.people.some((b) => b.act?.k === "carried" && b.act.tid === p.id && b.alive)) {
+      aL = aR = 1.15; aLx = -0.45; aRx = 0.45;
+    }
     r.body.position.set(bx, by, 0);
     r.body.rotation.set(0, 0, bz);
     r.torso.rotation.set(tx, 0, tz);
@@ -470,6 +544,11 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
               <group ref={tools("gun")} visible={false} rotation-z={Math.PI / 2}>
                 <mesh geometry={box} material={toolMats.wood} scale={[0.07, 0.42, 0.09]} position-y={-0.05} />
                 <mesh geometry={box} material={toolMats.gun} scale={[0.045, 1.0, 0.045]} position-y={0.6} />
+              </group>
+              <group ref={tools("bucket")} visible={false}>
+                <mesh geometry={box} material={toolMats.wood} scale={[0.26, 0.24, 0.26]} position-y={-0.14} castShadow />
+                <mesh geometry={box} material={toolMats.water} scale={[0.22, 0.02, 0.22]} position-y={-0.015} />
+                <mesh geometry={box} material={toolMats.string} scale={[0.02, 0.16, 0.02]} position-y={0.02} />
               </group>
               <group ref={tools("pickaxe")} visible={false} rotation-z={Math.PI / 2}>
                 <mesh geometry={box} material={toolMats.wood} scale={[0.04, 0.7, 0.04]} position-y={0.15} />

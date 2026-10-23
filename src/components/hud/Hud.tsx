@@ -2,9 +2,11 @@
 import { useEffect, useState } from "react";
 import { InstallButton } from "@/components/InstallButton";
 import { useHud, type GroupSummary, type PersonSummary } from "@/game/hud";
+import type { ChronicleEntry } from "@/sim/types";
 import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
 import { GROUP_POP, MAX_VIEWERS } from "@/sim/constants";
+import { HELP } from "./helpData";
 import { ERAS, TECHS } from "@/sim/data";
 import { moraleLabel } from "@/sim/morale";
 import { WEATHER_ICON, WEATHER_NAME } from "@/sim/weather";
@@ -99,6 +101,11 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
             </span>
           )}
           {s.war && <span className="chip alert">⚔️ 무리끼리 다툼</span>}
+          {s.fire && (
+            <span className="chip alert fire">
+              🔥 {s.fire.houses ? `건물 ${s.fire.houses}채 화재` : "산불"}{s.fire.count > s.fire.houses && s.fire.houses ? ` · 산불 ${s.fire.count - s.fire.houses}` : ""}
+            </span>
+          )}
           {s.beast && (
             <span className="chip alert">
               {s.beast.icon} {s.beast.name}{s.beast.count > 1 ? ` ${s.beast.count}마리` : ""} 출몰
@@ -328,7 +335,7 @@ function StructCard() {
   return (
     <div className="card person struct">
       <div className="phead">
-        <span className="big">🏠</span>
+        <span className="big">{st.state.startsWith("🔥") ? "🔥" : "🏠"}</span>
         <div>
           <div className="pn">
             {st.name} {st.floors > 1 && <span className="sub">{st.floors}층</span>}
@@ -352,13 +359,13 @@ function StructCard() {
 
 function Drawer() {
   const panel = useHud((s) => s.panel);
+  if (panel === "help") return <HelpModal />;
   if (panel === "none" || panel === "people") return panel === "people" ? <PeopleDrawer /> : null;
   return (
     <div className="card drawer">
       <button className="x" onClick={() => useHud.setState({ panel: "none" })}>✕</button>
       {panel === "chronicle" && <Chronicle />}
       {panel === "tech" && <TechTree />}
-      {panel === "help" && <Help />}
     </div>
   );
 }
@@ -468,34 +475,79 @@ function TechTree() {
   );
 }
 
-function Help() {
-  const touch = useTouch();
+/** 쪽 넘기기: ‹ ● ○ ○ › */
+function Pager({ page, pages, onPage, dots = true }: { page: number; pages: number; onPage: (n: number) => void; dots?: boolean }) {
+  if (pages <= 1) return null;
   return (
-    <>
-      <h3>섬을 돌보는 방법</h3>
-      <ul className="help">
-        {touch && (
-          <li>
-            📱 <b>탭</b> = 치기 · <b>한 손가락으로 끌기</b> = 물건 옮기기 / 빈 곳이면 시점 회전 · <b>두 손가락으로 끌기</b> = 시점 이동 · <b>벌리고 오므리기</b> = 확대·축소 · 사람을 <b>두 번 탭</b> = 따라가기
-          </li>
-        )}
-        <li>🖱️ <b>클릭</b> — 치기. 나무를 흔들면 열매나 가지가 떨어지고, 바위를 치면 돌이 떨어져요. 동물이나 물고기를 치면 잠시 기절해요.</li>
-        <li>✋ <b>드래그</b> — 물건·동물·물고기를 집어 옮겨요. 사람 앞에 놓아주면 선물로 여기고 반가워해요.</li>
-        <li>🔥 <b>연타</b> — 같은 자리를 빠르게 {5}번 클릭하면 불이 붙어요. 장작 위면 더 오래 타요. 비가 오면 잘 안 붙어요.</li>
-        <li>👤 사람은 건드릴 수 없어요. 클릭하면 마음과 상태를 볼 수 있고, 더블클릭하면 따라가요.</li>
-        <li>🏠 건물을 누르면 용도와 내구도가 보여요. <b>빠르게 세 번</b> 누르면 내구도가 깎이고, 0이 되면 무너져요. 큰 건물일수록 튼튼하고, 무너지면 사람들의 사기가 꺾여요.</li>
-        <li>🐺 가끔 맹수가 나타나 사람을 노려요. 섬에서 오래 지낼수록 늑대 → 곰 → 호랑이 → 검치호로 강해져요. 사람들은 그 시대의 무기(창·활·청동검·철창·총)를 만들어 맞서고, 망루·성루·포대에 올라 쏘아요. 맹수를 누르면 잠깐 휘청거려요.</li>
-        <li>⛏️ 섬이 두 배로 넓어졌어요. 바깥쪽 바위 언덕의 광맥에서 철·구리·주석, 드물게 은·금·다이아몬드를 캐요. 귀한 것일수록 잘 안 나와요.</li>
-        <li>🏗️ 시대가 지날수록 용도에 맞는 건물을 설계해 더 높고 반듯하게 지어요 (연립주택 · 아파트 · 대장간 · 공장 · 망루 · 성루).</li>
-        <li>🎥 빈 곳 드래그: 회전 · 우클릭/Shift 드래그: 이동 · 휠: 확대 · WASD/QE 키도 돼요.</li>
-        <li>⏳ 섬의 하루는 현실 20분이에요. 창을 닫아도 섬의 시간은 계속 흘러요.</li>
-        <li>🤧 춥거나 비·눈을 맞으면 감기에 걸릴 수 있어요. 1~5단계로 나빠지고, 3단계는 독감, 5단계는 요양소에서 떨어져 지내야 해요. 약초·땅속 뿌리·약돌을 찾아 약을 만들면 나아요.</li>
-        <li>🌀 아주 드물게 지진·태풍·쓰나미가 찾아와요. 사람들은 함께 고치고, 모여서 대비책을 궁리해요.</li>
-        <li>🏳️ {GROUP_POP}명이 넘으면 뜻이 맞는 사람끼리 조직을, 모두의 뜻이 맞으면 문명을 세워요. 저마다 역할을 맡지만, 뜻이 너무 다르면 다투다 갈라서기도 해요.</li>
-        <li>⛵ 과학 시대에 이르면 큰 배나 차원문을 만들어 섬 밖 세상에 다녀와요.</li>
-        <li>👁 같은 시드로 최대 {MAX_VIEWERS}명이 함께 지켜볼 수 있어요.</li>
-      </ul>
-    </>
+    <div className="pager">
+      <button onClick={() => onPage(page - 1)} disabled={page <= 0} aria-label="이전">‹</button>
+      {dots && pages <= 8 ? (
+        <span className="dots">
+          {Array.from({ length: pages }, (_, i) => (
+            <button key={i} className={i === page ? "on" : ""} onClick={() => onPage(i)} aria-label={`${i + 1}쪽`} />
+          ))}
+        </span>
+      ) : (
+        <span className="num">{page + 1} / {pages}</span>
+      )}
+      <button onClick={() => onPage(page + 1)} disabled={page >= pages - 1} aria-label="다음">›</button>
+    </div>
+  );
+}
+
+/** 도움말: 왼쪽에서 카테고리를 고르고, 오른쪽에서 기능 하나씩 그림과 함께 넘겨 본다 */
+function HelpModal() {
+  const touch = useTouch();
+  const [cat, setCat] = useState(0);
+  const [page, setPage] = useState(0);
+  const [broken, setBroken] = useState<Record<string, boolean>>({});
+  const c = HELP[cat];
+  const item = c.items[Math.min(page, c.items.length - 1)];
+  const close = () => useHud.setState({ panel: "none" });
+  const go = (n: number) => setPage(Math.max(0, Math.min(c.items.length - 1, n)));
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+      if (e.key === "ArrowRight") setPage((v) => Math.min(c.items.length - 1, v + 1));
+      if (e.key === "ArrowLeft") setPage((v) => Math.max(0, v - 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [c.items.length]);
+  return (
+    <div className="modal-back help-back" onClick={close}>
+      <div className="card help-modal" role="dialog" aria-label="도움말" onClick={(e) => e.stopPropagation()}>
+        <button className="x" onClick={close} aria-label="닫기">✕</button>
+        <nav className="help-cats">
+          <h3>도움말</h3>
+          {HELP.map((h, i) => (
+            <button key={h.id} className={i === cat ? "on" : ""} onClick={() => { setCat(i); setPage(0); }}>
+              <span>{h.icon}</span>
+              {h.name}
+              <i>{h.items.length}</i>
+            </button>
+          ))}
+        </nav>
+        <section className="help-page" key={item.id}>
+          <div className="help-img">
+            {broken[item.id] ? (
+              <span className="help-emoji">{item.icon}</span>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={`/help/${item.id}.webp`} alt={item.title} loading="lazy" onError={() => setBroken((b) => ({ ...b, [item.id]: true }))} />
+            )}
+          </div>
+          <div className="help-text">
+            <div className="help-title">
+              {item.icon} {item.title}
+              <span className="sub">{c.name} · {Math.min(page, c.items.length - 1) + 1}/{c.items.length}</span>
+            </div>
+            <p>{touch && item.touch ? item.touch : item.body}</p>
+          </div>
+          <Pager page={Math.min(page, c.items.length - 1)} pages={c.items.length} onPage={go} />
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -542,19 +594,33 @@ function Hint() {
   );
 }
 
+/** 자리를 비운 동안의 연대기: 한 쪽에 15개씩 */
+const AWAY_PAGE = 15;
+
 function Away() {
   const away = useHud((s) => s.away);
   if (!away) return null;
-  const days = away.days >= 1 ? `${Math.floor(away.days)}일` : `${Math.max(1, Math.round(away.days * 24))}시간`;
+  return <AwayModal key={`${away.days}:${away.entries.length}`} entries={away.entries} days={away.days} />;
+}
+
+function AwayModal({ entries, days }: { entries: ChronicleEntry[]; days: number }) {
+  const pages = Math.max(1, Math.ceil(entries.length / AWAY_PAGE));
+  const [page, setPage] = useState(0);
+  const label = days >= 1 ? `${Math.floor(days)}일` : `${Math.max(1, Math.round(days * 24))}시간`;
+  const list = entries.slice(page * AWAY_PAGE, page * AWAY_PAGE + AWAY_PAGE);
   return (
     <div className="modal-back">
-      <div className="card modal">
-        <h3>당신이 없는 동안 ({days})</h3>
+      <div className="card modal away">
+        <h3>
+          당신이 없는 동안 ({label})
+          <span className="sub"> · 이야기 {entries.length}개</span>
+        </h3>
         <ul className="chron">
-          {away.entries.slice(-30).map((c, i) => (
-            <li key={i} className={`k-${c.k}`}>{c.text}</li>
+          {list.map((c, i) => (
+            <li key={page * AWAY_PAGE + i} className={`k-${c.k}`}>{c.text}</li>
           ))}
         </ul>
+        <Pager page={page} pages={pages} onPage={(n) => setPage(Math.max(0, Math.min(pages - 1, n)))} dots={false} />
         <button className="primary" onClick={() => useHud.setState({ away: null })}>섬으로 돌아가기</button>
       </div>
     </div>

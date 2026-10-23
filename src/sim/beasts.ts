@@ -1,6 +1,6 @@
 // 맹수: 아주 가끔 숲 깊은 곳에서 나타나 사람을 노린다. 섬에서 보낸 날이 길수록 강한 놈이 온다.
 // 사람들은 그 시대의 무기를 들고 맞서거나 집으로 숨는다. 망루·성루·포대에 오르면 위에서 쏘아 마을을 지킨다.
-import { DAY, HOUR, MIN, WALK_SPEED } from "./constants";
+import { DAY, ERA_STRETCH, HOUR, MIN, WALK_SPEED } from "./constants";
 import { hourOf } from "./clock";
 import { BARE_HANDS, HOUSE_TYPES, STRUCTS, TECH_BY_ID, WEAPONS } from "./data";
 import { harm, maxHp } from "./building";
@@ -21,7 +21,8 @@ export const BEAST_INFO: Record<BeastKind, { name: string; from: number; to: num
 };
 
 /** 섬에서 보낸 날에 따라 강해진다: 처음엔 늑대, 몇 달 뒤엔 곰, 해가 바뀌면 호랑이… */
-export const beastPower = (w: WorldState) => 1 + w.time / DAY / 40;
+/** 시대가 느리게 넘어가는 만큼 맹수도 천천히 세진다 (그 시대의 무기로 맞설 수 있게) */
+export const beastPower = (w: WorldState) => 1 + w.time / DAY / (40 * ERA_STRETCH);
 export const kindFor = (pow: number): BeastKind => (pow >= 12 ? "sabertooth" : pow >= 6 ? "tiger" : pow >= 2.8 ? "bear" : "wolf");
 export const biteOf = (b: Beast) => 6 + 3 * Math.pow(b.pow, 0.8);
 /** 같은 종류 안에서 얼마나 큰 놈인지 0..1 (화면 크기) */

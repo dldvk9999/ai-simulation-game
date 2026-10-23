@@ -121,6 +121,47 @@ export const THOUGHTS: Record<string, string[]> = {
   shiny: ["{what}...!", "반짝반짝해!", "이렇게 귀한 걸!"],
   alarm: ["{place}에서 외친다! 맹수다!", "모두 집 안으로!", "맹수가 온다!"],
   smash: ["무슨 소리지?!", "건물이 흔들렸어!", "누가 두드리는 거야?", "어서 고쳐야겠어."],
+  // ─── 불 ───
+  fireAlarm: ["불이야! 불이야!", "물! 어서 물을 가져와!", "불길이 번진다!"],
+  fireHot: ["뜨거워! 피해!", "앗 뜨거!", "불길이 너무 세!"],
+  douse: ["어서 물을 퍼 오자!", "한 바가지라도 더!", "불길을 잡아야 해!"],
+  fireOut: ["휴, 겨우 껐다...", "다들 고생했어.", "불이 꺼졌다!"],
+  // ─── 아기 (말을 못 한다) ───
+  babyBabble: ["응애…", "아바바바", "(옹알옹알)", "까르르!", "맘마…", "우으…"],
+  babyCry: ["응애! 응애!", "으아앙!", "흐에엥…", "앙앙!"],
+  // ─── 어린이 ───
+  kidHungry: ["{parent}, 배고파!", "맘마 줘!", "배고파앙…", "밥 줘, 밥!"],
+  kidSleepy: ["{parent}, 졸려…", "재워 줘…", "같이 자!"],
+  kidPlay: ["{parent}, 놀아 줘! 놀아 줘!", "나랑 놀자아!", "{parent}, 나 봐 봐!", "잡기 놀이 하자!"],
+  kidTantrum: ["싫어! 싫어!", "안 해! 안 할 거야!", "으아아앙! 이거 할래!", "왜 안 돼애!"],
+  kidCry: ["으아앙…", "흐엉… 아파…", "무서워어…", "엉엉…"],
+  kidScolded: ["…잘못했어요.", "흑… 안 그럴게요.", "칫…", "…네에."],
+  kidWander: ["저기 뭐지?", "반짝반짝!", "개미다!", "저기까지 가 볼까?"],
+  kidHappy: ["헤헤!", "좋아! 또 해 줘!", "{parent} 최고!", "까르르!"],
+  kidHelp: ["나도 도울래요!", "이건 내가 할게요!", "{parent}, 이렇게 하는 거 맞아요?"],
+  kidFed: ["맛있어!", "냠냠!", "더 줘!"],
+  kidJoy: ["와아!", "신난다!", "헤헤."],
+  kidSad: ["힝…", "속상해…"],
+  kidFear: ["무서워…", "{parent} 어딨어…"],
+  kidAngry: ["씨잉!", "흥이다!"],
+  kidSurprise: ["우와!", "저게 뭐야?!"],
+  kidLove: ["좋아해!", "꼭 안아 줘!"],
+  kidCalm: ["룰루랄라~", "음~"],
+  // ─── 부모 ───
+  parentFeed: ["자, 아~ 하자.", "천천히 꼭꼭 씹어 먹으렴.", "{kid}, 배고팠구나."],
+  parentComfort: ["괜찮아, 괜찮아.", "{me} 여기 있어. 울지 마.", "많이 놀랐지? 이리 와."],
+  parentPlay: ["그래, 같이 놀자!", "잡아 봐라~!", "{kid}, 이번엔 숨바꼭질이다!"],
+  parentScold: ["그러면 안 돼!", "몇 번을 말했니!", "뚝! 이제 그만!", "멀리 가면 위험하다고 했지!"],
+  parentLull: ["자장자장, 우리 {kid}…", "이제 코 잘 시간이야.", "내일 또 놀자, 응?"],
+  parentPickup: ["옳지, 이리 온.", "우리 {kid}, 엄마 아빠랑 가자.", "번쩍!"],
+  parentPraise: ["{kid}, 잘하는구나!", "제법인데?", "고마워, {kid}."],
+  nightFeed: ["아이고, 또 깼구나…", "그래그래, 맘마 먹자.", "(하품) 금방 줄게…"],
+  noFoodKid: ["먹일 게 없네…", "조금만 참자, 응?"],
+};
+
+/** 일곱 살 전의 아이가 어른 혼잣말 대신 하는 말 */
+export const KID_TALK: Record<string, string> = {
+  joy: "kidJoy", sadness: "kidSad", fear: "kidFear", anger: "kidAngry", surprise: "kidSurprise", love: "kidLove", calm: "kidCalm",
 };
 
 export function thought(r: RngHolder, key: string, vars: Record<string, string> = {}) {

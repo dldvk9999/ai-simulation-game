@@ -2,9 +2,10 @@
 import { actLabel } from "@/sim/ai";
 import { ageYears, clockLabel, dayOf, seasonOf, SEASONS, timeOfDayLabel, yearOf } from "@/sim/clock";
 import { MAX_VIEWERS, SCHEMA_VERSION, SIM_TICK_MS, TIME_SCALE } from "@/sim/constants";
-import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, STRUCTS, TECH_BY_ID } from "@/sim/data";
+import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, STRUCTS, TECH_BY_ID, WOODEN } from "@/sim/data";
 import { active, beastName, TOWER, towerRange } from "@/sim/beasts";
 import { floorsOf, hpOf, maxHp, purposeOf } from "@/sim/building";
+import { carerOf, stageName } from "@/sim/childcare";
 import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
 import { ILL_NAME } from "@/sim/disease";
 import { groupStage, groupTitle } from "@/sim/society";
@@ -35,8 +36,8 @@ type PersonDyn = {
   i: number; x: number; z: number; r: number; a: Anim; g: string | 0; b: [string, string, number] | 0;
   c: Res | 0; k: string; ph: number; s?: string; rs?: string; l: number;
   n?: number[]; e?: number[]; hp?: number; o?: string;
-  /** 감기 단계, 섬 밖에 나가 있는지 */
-  il?: number; aw?: 1;
+  /** 감기 단계, 섬 밖에 나가 있는지, 안아 준 사람 */
+  il?: number; aw?: 1; ti?: number;
 };
 
 interface Dyn {
@@ -54,6 +55,8 @@ interface Dyn {
   /** 맹수 [id, x, z, 방향, 상태, 체력] */
   bs?: [number, number, number, number, Beast["st"], number][];
   mo?: number;
+  /** 불길 [id, x, z, 반경, 세기, 타는 건물] */
+  bz?: [number, number, number, number, number, number | 0][];
 }
 
 const NEED_KEYS = ["hunger", "thirst", "energy", "warmth", "social", "fun"] as const;
@@ -74,7 +77,7 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast"]);
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family"]);
 const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅" };
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
@@ -99,6 +102,9 @@ function beastAlert(w: WorldState) {
   const b = list.reduce((m, x) => (x.pow > m.pow ? x : m), list[0]);
   return { name: beastName(b), icon: BEAST_ICON[b.kind] ?? "🐾", count: list.length };
 }
+
+/** 아기 · 어린이 표시 (역할을 맡기 전) */
+const kidIcon = (yrs: number) => (yrs < 3 ? "👶" : yrs < 10 ? "🧒" : "");
 
 function towerNote(w: WorldState, s: Structure) {
   if (s.type === "mine") return "곡괭이로 캔 광석을 여기 내려놓는다";
@@ -313,6 +319,7 @@ export class GameRuntime {
         };
         if (p.ill) d.il = p.ill;
         if (p.away) d.aw = 1;
+        if (p.act?.k === "carried") d.ti = p.act.tid;
         if (detail) {
           d.n = NEED_KEYS.map((k) => Math.round(p.needs[k]));
           d.e = EMO_KEYS.map((k) => Math.round(p.emo[k] * 100));
@@ -328,6 +335,7 @@ export class GameRuntime {
       ds: w.disaster,
       bs: w.beasts.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp)]),
       mo: Math.round(w.morale),
+      bz: w.blazes.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.r), r1(b.heat), b.sid ?? 0]),
     };
   }
 
@@ -354,7 +362,7 @@ export class GameRuntime {
       p.bubble = q.b ? { text: q.b[0], emoji: q.b[1], until: q.b[2] } : null;
       p.carry = q.c ? { res: q.c, qty: 1 } : null;
       p.alive = q.l;
-      p.act = q.k ? ({ k: q.k, ph: q.ph, sub: q.s, res: q.rs, tx: p.x, tz: p.z, t: 0, started: 0 } as Act) : null;
+      p.act = q.k ? ({ k: q.k, ph: q.ph, sub: q.s, res: q.rs, tid: q.ti, tx: p.x, tz: p.z, t: 0, started: 0 } as Act) : null;
       if (q.n) NEED_KEYS.forEach((k, i) => (p.needs[k] = q.n![i]));
       if (q.e) EMO_KEYS.forEach((k, i) => (p.emo[k] = q.e![i] / 100));
       if (q.hp != null) p.health = q.hp;
@@ -380,6 +388,7 @@ export class GameRuntime {
       b.x = x; b.z = z; b.rot = rot; b.st = st; b.hp = hp;
     }
     if (d.mo != null) w.morale = d.mo;
+    if (d.bz) w.blazes = d.bz.map(([id, x, z, r, heat, sid]) => ({ id, x, z, r, max: r, heat, sid: sid || undefined, fuel: 0, t: 0, why: "spread", by: [] }));
     for (const [id, x, z, rot, st, held] of d.f) {
       const f = findById(w.fish, id);
       if (!f) continue;
@@ -591,7 +600,7 @@ export class GameRuntime {
       action: !p.alive ? "영원히 잠듦" : p.away ? (p.away.via === "ship" ? "바다 건너 항해 중" : "차원문 너머 여행 중") : actLabel(p.act),
       alive: !!p.alive,
       group: p.group ?? null,
-      role: p.role ? ROLE_ICON[p.role] : "",
+      role: p.role ? ROLE_ICON[p.role] : kidIcon(ageYears(p.birth, t)),
       ill: p.ill ?? 0,
       away: !!p.away,
     }));
@@ -640,6 +649,7 @@ export class GameRuntime {
       war: groups.some((g) => g.war),
       morale: Math.round(w.morale ?? 70),
       beast: beastAlert(w),
+      fire: w.blazes.length ? { count: w.blazes.length, houses: w.blazes.filter((b) => b.sid != null).length } : null,
       structure: hud.structId != null ? this.structDetail(hud.structId) : null,
       generation: w.stats.generation,
       people: summaries,
@@ -668,13 +678,15 @@ export class GameRuntime {
     }
     const def = STRUCTS[s.type];
     const dmg = s.dmg ?? 0;
-    const state = s.plan === 0 && s.prog < 1 ? "설계를 기다리는 중"
+    const blaze = w.blazes.find((b) => b.sid === s.id);
+    const state = blaze ? `🔥 불타는 중 (불길 ${Math.round(blaze.heat * 100)}%) · 사람들이 물을 퍼 나르는 중`
+      : s.plan === 0 && s.prog < 1 ? "설계를 기다리는 중"
       : s.prog < 1 ? `짓는 중 ${Math.round(s.prog * 100)}%`
       : dmg >= 0.6 ? "크게 부서져 쓸 수 없음 · 고칠 사람을 기다리는 중"
       : dmg > 0 ? "부서진 곳이 있음"
       : "튼튼함";
     const who = def.cap ? w.people.filter((p) => p.alive && p.home === s.id).map((p) => p.name).join(", ") : "";
-    const note = TOWER[s.type] ? `맹수가 오면 위에 올라가 쏜다 (사거리 ${towerRange(s)})` : towerNote(w, s);
+    const note = [TOWER[s.type] ? `맹수가 오면 위에 올라가 쏜다 (사거리 ${towerRange(s)})` : towerNote(w, s), s.fp ? "기와 지붕과 흙벽이라 불이 잘 붙지 않는다" : WOODEN.has(s.type) ? "나무로 지어 불이 붙기 쉽다" : ""].filter(Boolean).join(" · ");
     return {
       id: s.id,
       name: s.type === "grave" && s.name ? `${s.name}의 무덤` : def.name,
@@ -706,6 +718,11 @@ export class GameRuntime {
       if (n) family.push(`부모 ${n}`);
     }
     for (const q of w.people) if (q.parents.includes(p.id)) family.push(`아이 ${q.name}`);
+    // 열 살 전의 아이는 누가 돌보고 있는지
+    if (p.alive && ageYears(p.birth, w.time) < 10) {
+      const c = carerOf(w, p);
+      family.push(c ? `🤱 ${c.name}의 손길로 자라는 중` : "🤱 돌봐 줄 어른이 곁에 없음");
+    }
     const friends = Object.entries(p.rel)
       .filter(([id, v]) => v > 0.45 && Number(id) !== p.partner)
       .map(([id]) => name(Number(id)))
@@ -743,7 +760,7 @@ export class GameRuntime {
       home: home ? STRUCTS[home.type].name + (home.lv && home.lv > 1 ? ` ${home.lv}층` : "") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
       preg: !!p.preg,
       group: p.group ?? null,
-      role: p.role ? `${ROLE_ICON[p.role]} ${ROLE_NAME[p.role]}` : "",
+      role: p.role ? `${ROLE_ICON[p.role]} ${ROLE_NAME[p.role]}` : kidIcon(ageYears(p.birth, w.time)) && `${kidIcon(ageYears(p.birth, w.time))} ${stageName(ageYears(p.birth, w.time))}`,
       ill: p.ill ?? 0,
       illName: p.ill ? (p.flu && p.ill === 2 ? "독감 기운" : ILL_NAME[p.ill]) : "",
       away: !!p.away,

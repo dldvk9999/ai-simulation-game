@@ -32,7 +32,11 @@ interface P {
 }
 
 type Spec = { n: number; colors: string[]; speed: number; up: number; life: number; size: number; g: number; spread?: number; grow?: number };
-const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple", Spec>> = {
+const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple" | "blaze" | "ember", Spec>> = {
+  douse: { n: 26, colors: ["#d9f3ff", "#a8e0ff", "#ffffff", "#e9eef2"], speed: 2.2, up: 2.6, life: 1.1, size: 0.26, g: 6, spread: 0.6 },
+  cry: { n: 4, colors: ["#8fd3ff", "#d9f3ff"], speed: 0.8, up: 0.6, life: 0.7, size: 0.1, g: 5 },
+  blaze: { n: 1, colors: ["#4a4542", "#6b6560", "#58524d"], speed: 0.4, up: 1.8, life: 5, size: 2.2, g: -0.12, grow: 2.4 },
+  ember: { n: 1, colors: ["#ffb347", "#ff7b29", "#ffe08a"], speed: 0.6, up: 2.4, life: 1.4, size: 0.12, g: -0.6 },
   hit: { n: 6, colors: ["#c9b38a", "#a89070"], speed: 1.2, up: 1.5, life: 0.6, size: 0.25, g: 4 },
   click: { n: 5, colors: ["#fff6c2", "#ffffff"], speed: 1.6, up: 1.2, life: 0.45, size: 0.18, g: 3 },
   spark: { n: 10, colors: ["#ffd166", "#ff9f1c", "#fff3b0"], speed: 2.2, up: 3.5, life: 0.7, size: 0.16, g: 6 },
@@ -138,6 +142,14 @@ export function Effects({ terrain }: { terrain: Terrain }) {
         y = ground + 1.2;
         amb?.pop(180, 0.1);
       }
+      if (f.type === "douse") {
+        y = ground + 0.8;
+        amb?.pop(700, 0.05);
+      }
+      if (f.type === "cry") {
+        const p = w.people.find((q) => q.id === f.ref);
+        y = terrain.height(p?.x ?? f.x, p?.z ?? f.z) + 1.0;
+      }
       spawn(f.type, f.x, y, f.z);
     }
     if (seen.current.size > 3000) seen.current.clear();
@@ -151,6 +163,17 @@ export function Effects({ terrain }: { terrain: Terrain }) {
         if ((s.type === "campfire" && s.lit) || (s.type === "smelter" && s.prog >= 1)) {
           const y = terrain.height(s.x, s.z) + (s.type === "smelter" ? 2.8 : 0.9);
           spawn("smoke", s.x, y, s.z);
+        }
+      }
+      // 불길: 짙은 연기와 불티
+      for (const b of w.blazes ?? []) {
+        const n = Math.ceil(b.heat * (b.sid != null ? 2 : 1 + b.r / 3));
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * Math.PI * 2, r = Math.random() * b.r * 0.8;
+          const x = b.x + Math.cos(a) * r, z = b.z + Math.sin(a) * r;
+          const y = Math.max(terrain.height(x, z), 0) + (b.sid != null ? 2.4 : 1.2);
+          spawn("blaze", x, y, z);
+          if (Math.random() < 0.6) spawn("ember", x, y - 0.6, z);
         }
       }
     }

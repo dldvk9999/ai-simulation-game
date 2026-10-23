@@ -1,9 +1,11 @@
 import { runPerson } from "./ai";
+import { dailyKids } from "./childcare";
 import { dailyBeasts, updateBeasts } from "./beasts";
 import { DAY, HOUR, MAX_CATCHUP, TIME_SCALE } from "./constants";
 import { dayOf, seasonOf, SEASONS } from "./clock";
 import { dailyAnimals, updateAnimals, updateFish, updateItems, updatePlants, updateStructures } from "./ecology";
 import { dailyDisaster, updateDisaster } from "./disaster";
+import { updateFires } from "./fire";
 import { spreadIllness, updateIllness } from "./disease";
 import { METAL_INFO } from "./data";
 import { dailyMorale } from "./morale";
@@ -29,6 +31,7 @@ export function step(w: WorldState, dt: number) {
   updateBeasts(w, T, dt);
   updateFish(w, T, dt);
   updateStructures(w, dt);
+  updateFires(w, T, dt);
   updateItems(w, T, dt);
 
   const ctx = makeCtx(w, T);
@@ -69,6 +72,7 @@ function daily(w: WorldState) {
   dailyDisaster(w);
   dailyVoyage(w);
   dailyBeasts(w);
+  dailyKids(w);
   const pop = living(w).length;
   dailyMorale(w, { housed: houseCapacity(w) >= pop, fed: foodTotal(w) >= pop * 6 });
   // 바위는 천천히 다시 드러난다 (귀한 광맥일수록 더디게)

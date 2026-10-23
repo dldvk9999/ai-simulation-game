@@ -2,6 +2,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { heightOf } from "@/sim/building";
 import { STRUCTS } from "@/sim/data";
 import type { Terrain } from "@/sim/terrain";
 import type { Structure, StructureType } from "@/sim/types";
@@ -514,6 +515,9 @@ const windowMat = new THREE.MeshStandardMaterial({ color: "#bfe3ff", emissive: n
 const scaffoldMat = new THREE.MeshStandardMaterial({ color: "#c9a26b", flatShading: true, transparent: true, opacity: 0.85 });
 const ghostMat = new THREE.MeshStandardMaterial({ color: "#ffffff", transparent: true, opacity: 0.18, depthWrite: false });
 /** 아직 설계 중인 건물: 푸른 도면처럼 */
+/** 불에 강한 재질(기와 지붕·흙벽)로 지은 건물은 붉은 흙빛이 돈다 */
+const fpMat = vcMat.clone();
+fpMat.color.set("#f2c9b4");
 const planMat = new THREE.MeshBasicMaterial({ color: "#7fb8ff", transparent: true, opacity: 0.2, depthWrite: false, wireframe: true });
 const stringMat = new THREE.MeshBasicMaterial({ color: "#f2e6c9" });
 const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 4);
@@ -525,10 +529,12 @@ const rubbleGeo = merge([
   part(G.box, { color: "#6e4a30", pos: [-1.2, 0.07, 0], scale: [0.18, 0.1, 0.8], rot: [0, 0.3, 0] }),
 ]);
 
-const flameGeo = new THREE.ConeGeometry(0.32, 0.9, 6, 1, true);
+const flameGeo = new THREE.ConeGeometry(0.32, 0.9, 7, 1, true);
 const flameInnerGeo = new THREE.ConeGeometry(0.18, 0.55, 6);
 const flameMat = new THREE.MeshBasicMaterial({ color: "#ff8a2a", transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide });
 const flameInnerMat = new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.95, depthWrite: false });
+/** 곁불: 가장자리의 붉은 불 혀 */
+const flameEdgeMat = new THREE.MeshBasicMaterial({ color: "#ff5a1f", transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
 const beamGeo = new THREE.ConeGeometry(2.2, 26, 16, 1, true).rotateZ(Math.PI / 2).translate(13, 0, 0);
 const beamMat = new THREE.MeshBasicMaterial({ color: "#fff3c4", transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
 
@@ -557,7 +563,7 @@ function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
   return (
     <group position={[s.x, groundY, s.z]} quaternion={tilt}>
       <group scale={[1, sy * (1 - dmg * 0.3), 1]} rotation={[dmg * 0.14, 0, dmg * 0.1]}>
-        <mesh geometry={model.geo} material={vcMat} castShadow receiveShadow />
+        <mesh geometry={model.geo} material={s.fp ? fpMat : vcMat} castShadow receiveShadow />
         {model.windows && <mesh geometry={model.windows} material={windowMat} />}
       </group>
       {dmg > 0 && (
@@ -627,7 +633,7 @@ function Fires({ terrain }: { terrain: Terrain }) {
   const { camera } = useThree();
   const flames = useRef<THREE.Group>(null);
   const lights = useRef<THREE.PointLight[]>([]);
-  const POOL = 24;
+  const POOL = 64;
   useFrame((state) => {
     const w = rt.world;
     const g = flames.current;
@@ -642,6 +648,21 @@ function Fires({ terrain }: { terrain: Terrain }) {
     }
     for (const p of w.plants) {
       if (p.burn) fires.push({ x: p.x, y: terrain.height(p.x, p.z) + 1.2 * p.s, z: p.z, s: 2.4 * p.s, d: 0 });
+    }
+    // 번지는 불길: 건물은 지붕 둘레에, 땅불은 불길 안에 고루
+    for (const b of w.blazes ?? []) {
+      const st = b.sid != null ? w.structures.find((s) => s.id === b.sid) : undefined;
+      const n = st ? 8 : Math.min(14, 4 + Math.round(b.r * 1.3));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + b.id * 0.7;
+        const k = (i * 0.618 + b.id * 0.13) % 1;
+        // 건물은 지붕과 벽 둘레에 번갈아, 땅불은 불길 안에 고루
+        const roof = !!st && i % 2 === 0;
+        const rr = st ? b.r * (roof ? 0.35 : 0.8) : b.r * (0.2 + k * 0.75);
+        const x = b.x + Math.cos(a) * rr, z = b.z + Math.sin(a) * rr;
+        const y = terrain.height(x, z) + (st ? (roof ? heightOf(st) * 0.8 : 0.1) : 0.05);
+        fires.push({ x, y, z, s: (st ? 1.5 : 1.35) * (0.4 + b.heat * 0.9) * (0.75 + k * 0.5), d: 0 });
+      }
     }
     let near = 0;
     for (const f of fires) {
@@ -682,6 +703,8 @@ function Fires({ terrain }: { terrain: Terrain }) {
           <group key={i} visible={false}>
             <mesh geometry={flameGeo} material={flameMat} />
             <mesh geometry={flameInnerGeo} material={flameInnerMat} position-y={-0.1} />
+            <mesh geometry={flameGeo} material={flameEdgeMat} position={[0.2, -0.17, 0.06]} scale={[0.6, 0.66, 0.6]} rotation-z={-0.28} />
+            <mesh geometry={flameGeo} material={flameEdgeMat} position={[-0.18, -0.2, -0.1]} scale={[0.55, 0.56, 0.55]} rotation-z={0.32} />
           </group>
         ))}
       </group>

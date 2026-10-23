@@ -9,7 +9,7 @@ import {
   available, houseCapacity, litFires, planGrave, projectNeed, storagePoint,
 } from "./settlement";
 import type { Terrain } from "./terrain";
-import { EMOJI, josa, thought } from "./text";
+import { EMOJI, josa, KID_TALK, thought } from "./text";
 import type { Emotion, Gesture, Person, Stock, Structure, WeatherType, WorldState } from "./types";
 import { addFx, bump, chron, createPerson, dist, findById, knows, living, spawnCastaway } from "./world";
 
@@ -98,7 +98,13 @@ export function dominant(p: Person): [Emotion | "calm", number] {
 
 export function say(w: WorldState, p: Person, key: string, vars: Record<string, string> = {}, emoji?: string, force = false) {
   if (!force && w.time - p.lastThought < 20 * TIME_SCALE) return;
-  const text = thought(w, key, vars);
+  // 세 살 전에는 말을 못 하고, 일곱 살 전에는 어른처럼 생각하지 못한다
+  const yrs = ageYears(p.birth, w.time);
+  let k = key;
+  if (yrs < 3) k = key === "babyCry" ? key : "babyBabble";
+  else if (yrs < 7 && !key.startsWith("kid")) k = KID_TALK[dominant(p)[0]] ?? "kidCalm";
+  if (k !== key && k.startsWith("kid")) vars = { parent: "엄마", ...vars };
+  const text = thought(w, k, vars);
   if (!text) return;
   p.bubble = { text, emoji: emoji ?? EMOJI[dominant(p)[0]] ?? "", until: w.time + 5.5 * TIME_SCALE };
   p.lastThought = w.time;

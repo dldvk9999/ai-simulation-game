@@ -1,4 +1,4 @@
-import { DAY, HOUR, TIME_SCALE } from "./constants";
+import { DAY, ERA_PACE, HOUR, TIME_SCALE } from "./constants";
 import { ageYears } from "./clock";
 import { newProject } from "./building";
 import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
@@ -43,7 +43,7 @@ export function researchMul(w: WorldState) {
   // 조직을 이루면 체계적으로, 문명을 세우면 더욱 빠르게 배운다
   if (w.groups?.some((g) => g.kind === "civ")) m *= w.structures.some((s) => s.type === "hall" && s.prog >= 1) ? 1.32 : 1.25;
   else if (w.groups?.length) m *= 1.1;
-  return m * moraleMul(w);
+  return m * moraleMul(w) * ERA_PACE[currentEra(w)];
 }
 
 export function chooseFocus(w: WorldState) {
@@ -60,6 +60,8 @@ export function chooseFocus(w: WorldState) {
   // 겪은 재해에 맞서는 방법은 모두가 머리를 맞대고 먼저 궁리한다
   const recent = !!w.history && w.time - w.history.lastDisaster < 20 * DAY;
   const counter = recent ? ["bracing", "forecast", "seawall", "quakeproof"] : [];
+  // 불을 겪은 뒤에는 불에 강한 집을 궁리한다
+  if (w.history?.lastFire && w.time - w.history.lastFire < 30 * DAY) counter.push("fireproof");
   // 맹수에게 시달린 뒤에는 무기와 망루부터
   const hunted = !!w.history?.lastBeast && w.time - w.history.lastBeast < 30 * DAY;
   const arms = ["bronzeweapon", "ironweapon", "firearm", "rifle", "watchtower", "fortress"];
@@ -87,13 +89,16 @@ export function chooseFocus(w: WorldState) {
   w.tech.focus = av[0].id;
 }
 
+/** 목숨이 걸린 지식(약초·약)은 시대가 느리게 흘러도 덜 더디게 깨친다 */
+const LIFESAVING = new Set(["herbs", "remedy"]);
+
 /** 연구 점수를 더한다. tech를 지정하면 그 기술에, 아니면 현재 목표에. */
 export function addResearch(w: WorldState, p: Person | null, pts: number, tech?: string) {
   const id = tech ?? w.tech.focus;
   if (!id || knows(w, id)) return;
   const def = TECH_BY_ID[id];
   if (!def || !def.prereq.every((q) => knows(w, q)) || !needsMet(w, def)) return;
-  const v = (w.tech.prog[id] ?? 0) + pts * researchMul(w);
+  const v = (w.tech.prog[id] ?? 0) + pts * researchMul(w) * (LIFESAVING.has(id) ? 2.5 : 1);
   w.tech.prog[id] = v;
   if (v >= def.cost) discover(w, p, id);
 }

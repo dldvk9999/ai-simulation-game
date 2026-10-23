@@ -1,6 +1,6 @@
 // 건물의 내구도 · 층수 · 설계. 재해든 맹수든 관찰자의 손길이든, 부서지고 무너지는 일은 모두 여기서 처리한다.
 import { HOUR } from "./constants";
-import { NO_DESIGN, PURPOSE_NAME, STORIED, STRUCTS, type Purpose } from "./data";
+import { NO_DESIGN, PURPOSE_NAME, STORIED, STRUCTS, WOODEN, type Purpose } from "./data";
 import { shiftMorale } from "./morale";
 import { feel, lying, say } from "./people";
 import { chance, range } from "./rng";
@@ -43,6 +43,8 @@ export function newProject(w: WorldState, type: StructureType, site: { x: number
   const lv = designLevel(w, type);
   if (lv > 1) s.lv = lv;
   if (!NO_DESIGN.has(type) && !w.designs.includes(designKey(type, lv))) s.plan = 0;
+  // 불에 강한 건축을 알면 나무 건물도 기와 지붕과 흙벽으로 짓는다
+  if (WOODEN.has(type) && knows(w, "fireproof")) s.fp = 1;
   w.structures.push(s);
   bump(w);
   return s;
@@ -72,7 +74,7 @@ export function finishDesign(w: WorldState, s: Structure, p: Person) {
 
 // ─── 부서짐과 무너짐 ───────────────────────────────────────────────────
 
-export type HarmCause = DisasterType | "beast" | "hand";
+export type HarmCause = DisasterType | "beast" | "hand" | "fire";
 
 /** 무너지면 사기가 꺾이는 정도: 중요한 건물일수록 크다 */
 export function lossFor(type: StructureType) {
@@ -164,8 +166,8 @@ function collapse(w: WorldState, T: Terrain, s: Structure, cause: HarmCause) {
     p.seen.reeval = 0;
   }
   // 재해 때는 재해가 지나간 뒤에 한꺼번에 기록한다
-  if (cause === "hand" || cause === "beast") {
-    const why = cause === "beast" ? "맹수가 들이받아 " : "";
+  if (cause === "hand" || cause === "beast" || cause === "fire") {
+    const why = cause === "beast" ? "맹수가 들이받아 " : cause === "fire" ? "불길에 휩싸인 끝에 " : "";
     chron(w, "disaster", `${why}${josa(def.name, "이/가")} 무너졌다.${hurt ? ` ${hurt}명이 다쳤다.` : ""}${loss >= 10 ? " 사람들은 망연자실했다." : ""}`);
   }
   return hurt;

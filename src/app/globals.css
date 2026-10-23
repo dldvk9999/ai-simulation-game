@@ -1003,3 +1003,147 @@ button {
 .card.struct .big { font-size: 26px; }
 .chron .k-beast,
 .toast.k-beast { color: #c2410c; }
+.chron .k-fire,
+.toast.k-fire { color: #d9480f; }
+.chron .k-family,
+.toast.k-family { color: #9c36b5; }
+.chip.alert.fire { background: #fff0e6; color: #d9480f; }
+
+/* ─── 도움말: 왼쪽 카테고리 · 오른쪽 기능 한 장씩 ─── */
+.help-back { z-index: 30; }
+.card.help-modal {
+  position: relative;
+  display: grid;
+  grid-template-columns: 184px 1fr;
+  width: min(840px, calc(100vw - 32px));
+  height: min(580px, calc(100vh - 48px));
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  background: rgba(255, 250, 240, 0.97);
+}
+.help-modal > .x {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 250, 240, 0.95);
+  box-shadow: 0 2px 8px rgba(30, 40, 50, 0.12);
+  font-size: 16px;
+}
+.help-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  border-right: 1px solid var(--line);
+  background: rgba(238, 224, 200, 0.45);
+  overflow-y: auto;
+}
+.help-cats h3 { margin: 2px 10px 12px; font-size: 17px; }
+.help-cats button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  text-align: left;
+  white-space: nowrap;
+}
+.help-cats button span { width: 22px; text-align: center; }
+.help-cats button i { margin-left: auto; font-style: normal; font-size: 12px; color: var(--ink-soft); }
+.help-cats button:hover { background: rgba(255, 255, 255, 0.6); }
+.help-cats button.on { background: #fff; box-shadow: 0 2px 10px rgba(30, 40, 50, 0.08); font-weight: bold; }
+.help-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 18px 22px 16px;
+  animation: helpIn 0.25s ease-out;
+}
+.help-img {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #b9dcf2, #ffd9b8 60%, #4fa7c4);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.help-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.help-emoji { font-size: 64px; }
+.help-text { flex: 1; padding: 14px 4px 4px; }
+.help-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 18px; font-weight: bold; }
+.help-title .sub { font-size: 12px; font-weight: normal; color: var(--ink-soft); }
+.help-text p { margin: 8px 0 0; font-size: 15px; line-height: 1.7; }
+@keyframes helpIn { from { opacity: 0; transform: translateX(10px); } }
+
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; }
+.pager > button {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+}
+.pager > button:disabled { opacity: 0.3; cursor: default; }
+.pager .dots { display: flex; align-items: center; gap: 7px; }
+.pager .dots button {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: rgba(63, 51, 40, 0.2);
+  transition: width 0.2s, background 0.2s;
+}
+.pager .dots button.on { width: 22px; background: var(--accent); }
+.pager .num { min-width: 56px; text-align: center; font-size: 14px; color: var(--ink-soft); }
+.modal.away .pager { margin: 10px 0 2px; }
+
+@media (max-width: 760px) {
+  /* 카테고리는 위쪽 가로 탭으로 */
+  .card.help-modal {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    width: calc(100vw - 24px);
+    height: calc(100% - 24px);
+  }
+  .help-cats {
+    flex-direction: row;
+    gap: 6px;
+    padding: 10px 52px 10px 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .help-cats::-webkit-scrollbar { display: none; }
+  .help-cats h3, .help-cats button i { display: none; }
+  .help-cats button { flex-shrink: 0; gap: 6px; padding: 8px 12px; font-size: 14px; }
+  .help-page { padding: 12px 14px; overflow-y: auto; }
+  .help-text p { font-size: 14.5px; }
+}
+
+/* 자리를 비운 동안: 목록만 스크롤하고 쪽 넘기기와 버튼은 늘 보이게 */
+.modal.away {
+  display: flex;
+  flex-direction: column;
+  max-height: min(78vh, 640px);
+  overflow: hidden;
+}
+.modal.away .chron { flex: 1; min-height: 0; overflow-y: auto; }
+.modal.away .primary { flex-shrink: 0; }

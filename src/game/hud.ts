@@ -101,6 +101,8 @@ export interface HudState {
   /** 사기 0..100 */
   morale: number;
   beast: { name: string; icon: string; count: number } | null;
+  /** 타오르는 불길 수와 그중 건물에 붙은 불 */
+  fire: { count: number; houses: number } | null;
   structId: number | null;
   structure: StructDetail | null;
   selectedId: number | null;
@@ -142,6 +144,7 @@ export const useHud = create<HudState>(() => ({
   war: false,
   morale: 70,
   beast: null,
+  fire: null,
   structId: null,
   structure: null,
   selectedId: null,

@@ -153,6 +153,8 @@ export interface Structure {
   lv?: number;
   /** 0이면 아직 설계 중이라 공사를 시작하지 못한다 */
   plan?: number;
+  /** 불에 강한 재질(기와·흙벽)로 지었다 */
+  fp?: number;
 }
 
 export type Emotion = "joy" | "sadness" | "fear" | "anger" | "surprise" | "love";
@@ -169,13 +171,19 @@ export type ActKind =
   | "shelter" | "warm" | "mourn" | "care" | "collect" | "react" | "unconscious" | "explore"
   | "tame" | "play" | "follow"
   | "rest" | "isolate" | "nurse" | "medicate" | "dig" | "council" | "repair" | "evacuate" | "fight" | "board"
-  | "defend" | "hide" | "design";
+  | "defend" | "hide" | "design"
+  /** 불 끄기 · 불길에서 달아나기 */
+  | "douse" | "flee"
+  /** 아기는 안겨 다니고, 어린이는 떼쓰고 조르고 울고, 일곱 살부터는 어른 일을 거든다 */
+  | "carried" | "fuss" | "assist";
 
 export type Anim =
   | "idle" | "walk" | "run" | "chop" | "pick" | "sit" | "sleep" | "eat" | "think" | "knap"
   | "hammer" | "fish" | "talk" | "sing" | "swim" | "lie" | "carry" | "dig" | "stir" | "cheer"
   | "dance" | "slump" | "cower" | "stomp" | "startle" | "heart" | "stretch" | "wave" | "pray"
-  | "drink" | "throw" | "play" | "cough" | "fight" | "row" | "aim" | "slash" | "mine";
+  | "drink" | "throw" | "play" | "cough" | "fight" | "row" | "aim" | "slash" | "mine"
+  | "scoop" | "bucket" | "douse"
+  | "held" | "crawl" | "cry" | "tantrum" | "beg" | "hug" | "scold";
 
 export interface Act {
   k: ActKind;
@@ -246,6 +254,22 @@ export interface Person {
   core?: [number, number];
   /** 섬 밖에 나가 있는 동안 */
   away?: { until: number; via: "ship" | "portal"; trip: number } | null;
+  /** 열 살이 되기 전의 마음: 바라는 것과 말썽, 혼난 뒤 얌전한 시간 */
+  kid?: KidMind;
+}
+
+export type KidWant = "hungry" | "play" | "tantrum" | "cry" | "cling" | "sleepy";
+
+export interface KidMind {
+  /** 지금 부모에게 바라는 것과 바라기 시작한 시각 */
+  want: KidWant | null;
+  since: number;
+  /** 말썽 0..1 (너무 쌓이면 혼이 난다) */
+  mis: number;
+  /** 이 시각까지는 혼난 게 생각나서 얌전하다 */
+  good: number;
+  /** 마지막으로 떼쓴 시각 */
+  fuss: number;
 }
 
 export type Role =
@@ -339,7 +363,7 @@ export interface Beast {
 
 export type ChronicleKind =
   | "arrive" | "discover" | "build" | "birth" | "death" | "couple" | "weather" | "gift" | "era" | "misc" | "season"
-  | "disease" | "disaster" | "society" | "voyage" | "beast";
+  | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family";
 
 export interface ChronicleEntry {
   t: number;
@@ -351,7 +375,7 @@ export type FxType =
   | "hit" | "spark" | "ignite" | "fizzle" | "chip" | "shake" | "splash" | "lightning" | "eureka"
   | "drop" | "stun" | "complete" | "birth" | "arrive" | "catch" | "chop"
   | "dust" | "heal" | "clash" | "portal" | "collapse"
-  | "roar" | "shot" | "bite" | "crack";
+  | "roar" | "shot" | "bite" | "crack" | "douse" | "cry";
 
 export interface Fx {
   id: number;
@@ -390,6 +414,8 @@ export interface WorldState {
     disaster?: number; voyage?: number; council?: number;
     /** 다음 맹수가 올 수 있는 날, 오늘 나타날 시각, 사기가 바닥난 시각, 무기 이야기를 남긴 시각 */
     beast?: number; beastAt?: number; moraleLow?: number; weaponGap?: number;
+    /** 불이 번진 이야기 · 아이를 혼낸 이야기를 마지막으로 남긴 시각 (연대기가 넘치지 않게) */
+    fireLog?: number; scoldLog?: number;
   };
   fx: Fx[];
   // ─── v2 ───
@@ -400,6 +426,8 @@ export interface WorldState {
     quake: number; typhoon: number; tsunami: number; sick: number; wars: number; lastDisaster: number; lastType: DisasterType | null;
     /** 맹수가 나타난 횟수와 마지막 시각 */
     beast?: number; lastBeast?: number;
+    /** 불이 난 횟수와 마지막 시각 */
+    fire?: number; lastFire?: number;
   };
   /** 찾아낸 약재 원료 · 광맥 · 금속 */
   found: string[];
@@ -412,6 +440,29 @@ export interface WorldState {
   morale: number;
   /** 이미 설계해 본 건물 ("종류:층수") */
   designs: string[];
+  // ─── v4 ───
+  /** 타오르는 불길 */
+  blazes: Blaze[];
+}
+
+/** 불길: 건물에 붙었거나(sid) 번개·관찰자의 불씨로 땅에 번진 불 */
+export interface Blaze {
+  id: number;
+  x: number;
+  z: number;
+  /** 지금 불길의 반경과 커질 수 있는 끝 */
+  r: number;
+  max: number;
+  /** 세기 0..1 (0이 되면 꺼진다) */
+  heat: number;
+  /** 타고 있는 건물 */
+  sid?: number;
+  /** 땅불이 다 타 버릴 때까지 남은 시간 */
+  fuel: number;
+  t: number;
+  why: "lightning" | "hand" | "spread";
+  /** 물을 끼얹은 사람들 */
+  by: number[];
 }
 
 export type InteractionKind = "hit" | "ignite" | "dragStart" | "dragMove" | "dragEnd" | "smash";
