@@ -1,3 +1,4 @@
+import { dailyArrivals, nextArrival } from "./arrivals";
 import { DAY, HOUR, MAX_POP, TIME_SCALE } from "./constants";
 import { ageYears, hourOf, isEvening, isNight } from "./clock";
 import { STRUCTS, TECH_BY_ID } from "./data";
@@ -414,8 +415,9 @@ export function dailyPeople(w: WorldState, T: Terrain) {
     // 바다 건너 나간 사람들이 돌아오기를 기다린다
   } else if (now.length === 0 && w.time >= w.timers.castaway) {
     arrive(w, T, true);
-  } else if (now.length > 0 && now.length < 10 && w.time >= w.timers.castaway && chance(w, settled ? 0.35 : 0.12)) {
-    arrive(w, T, false);
+  } else if (now.length > 0) {
+    // 표류 · 이주 가족 · 피난 · 탐험대 · 상인 · 순례 · 차원문 (한 번에 최대 10명)
+    dailyArrivals(w, T, settled);
   }
 
   // 오래된 기억 정리
@@ -483,10 +485,10 @@ function arrive(w: WorldState, T: Terrain, afterExtinction: boolean) {
     w.stats.generation++;
     chron(w, "arrive", `새로운 표류자 ${josa(person.name, "이/가")} 섬에 닿았다. 누군가 남긴 흔적이 보인다.`);
     // 집과 불자리를 물려받는다
-    w.timers.castaway = w.time + range(w, 5, 10) * DAY;
+    w.timers.castaway = w.time + range(w, 5 / 1.5, 10 / 1.5) * DAY;
   } else {
     chron(w, "arrive", `새로운 표류자 ${josa(person.name, "이/가")} 해변으로 떠밀려 왔다.`);
-    w.timers.castaway = w.time + range(w, 5, 12) * DAY;
+    w.timers.castaway = nextArrival(w);
     for (const q of living(w)) {
       if (q === person) continue;
       feel(w, q, "surprise", 0.5);

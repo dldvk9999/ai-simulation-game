@@ -1147,3 +1147,15 @@ button {
 }
 .modal.away .chron { flex: 1; min-height: 0; overflow-y: auto; }
 .modal.away .primary { flex-shrink: 0; }
+
+/* ─── 나라 · 종교 · 경제 ─── */
+.chip.nation { background: rgba(231, 195, 90, 0.3); }
+.chip.bless { background: rgba(116, 192, 252, 0.22); }
+.society { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+.society .foreign { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chron .k-faith,
+.toast.k-faith { color: #6741d9; }
+.chron .k-trade,
+.toast.k-trade { color: #2b8a3e; }
+.chron .k-nation,
+.toast.k-nation { color: #b8860b; }

@@ -34,6 +34,8 @@ interface P {
 type Spec = { n: number; colors: string[]; speed: number; up: number; life: number; size: number; g: number; spread?: number; grow?: number };
 const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple" | "blaze" | "ember", Spec>> = {
   douse: { n: 26, colors: ["#d9f3ff", "#a8e0ff", "#ffffff", "#e9eef2"], speed: 2.2, up: 2.6, life: 1.1, size: 0.26, g: 6, spread: 0.6 },
+  coin: { n: 8, colors: ["#ffd43b", "#f5c542", "#fff3b0"], speed: 1.2, up: 2.4, life: 0.9, size: 0.16, g: 6 },
+  pray: { n: 14, colors: ["#fff3b0", "#d0bfff", "#ffffff"], speed: 0.5, up: 1.6, life: 2.2, size: 0.2, g: -0.5, spread: 0.6 },
   cry: { n: 4, colors: ["#8fd3ff", "#d9f3ff"], speed: 0.8, up: 0.6, life: 0.7, size: 0.1, g: 5 },
   blaze: { n: 1, colors: ["#4a4542", "#6b6560", "#58524d"], speed: 0.4, up: 1.8, life: 5, size: 2.2, g: -0.12, grow: 2.4 },
   ember: { n: 1, colors: ["#ffb347", "#ff7b29", "#ffe08a"], speed: 0.6, up: 2.4, life: 1.4, size: 0.12, g: -0.6 },
@@ -141,6 +143,14 @@ export function Effects({ terrain }: { terrain: Terrain }) {
       if (f.type === "crack") {
         y = ground + 1.2;
         amb?.pop(180, 0.1);
+      }
+      if (f.type === "coin") {
+        y = ground + 1.2;
+        amb?.pop(1200, 0.03);
+      }
+      if (f.type === "pray") {
+        y = ground + 1.4;
+        amb?.chime();
       }
       if (f.type === "douse") {
         y = ground + 0.8;

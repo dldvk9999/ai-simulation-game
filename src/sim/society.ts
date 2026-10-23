@@ -27,8 +27,10 @@ export const membersOf = (w: WorldState, g: Group) => w.people.filter((p) => p.a
 export function groupTitle(w: WorldState, g: Group) {
   return g.kind === "civ" ? `${g.name} 문명` : g.name;
 }
+const GOV: Record<string, string> = { monarchy: "왕정", cabinet: "왕과 대신들", parliament: "의회를 둔 왕정" };
 export function groupStage(w: WorldState, g: Group) {
   if (g.kind === "org") return "조직";
+  if (g.kind === "nation") return `왕국 · ${GOV[g.gov?.kind ?? "monarchy"]}`;
   const era = currentEra(w);
   return `문명 ${era + 1}단계 · ${CIV_STAGE[era]}`;
 }
@@ -277,6 +279,8 @@ function demand(w: WorldState, g: Group): Record<Role, number> {
     cook: knows(w, "cooking") ? 0.4 : 0,
     sailor: knows(w, "boat") ? 0.5 + (knows(w, "navigation") ? 0.4 : 0) : 0,
     guard: g.war ? 1.4 : (w.history?.beast ?? 0) > 0 ? 0.6 : 0,
+    king: 0,
+    minister: 0,
   };
 }
 
@@ -286,8 +290,14 @@ function assignRoles(w: WorldState, g: Group) {
   const need = demand(w, g);
   const count: Partial<Record<Role, number>> = {};
   const leader = findById(w.people, g.leader);
-  if (leader?.alive) leader.role = "leader";
-  const rest = ms.filter((p) => p !== leader).sort((a, b) => Math.max(...ROLES.map((r) => fit(b, r))) - Math.max(...ROLES.map((r) => fit(a, r))));
+  if (leader?.alive) leader.role = g.kind === "nation" ? "king" : "leader";
+  // 나라의 대신은 그 자리를 지킨다
+  const keep = new Set([g.gov?.chancellor, g.gov?.general, g.gov?.treasurer].filter((x): x is number => x != null));
+  for (const id of keep) {
+    const m = findById(w.people, id);
+    if (m?.alive && m.group === g.id) m.role = "minister";
+  }
+  const rest = ms.filter((p) => p !== leader && !keep.has(p.id)).sort((a, b) => Math.max(...ROLES.map((r) => fit(b, r))) - Math.max(...ROLES.map((r) => fit(a, r))));
   for (const p of rest) {
     let best: Role = "builder", bs = -Infinity;
     for (const r of ROLES) {
@@ -381,7 +391,8 @@ export function dailySociety(w: WorldState, T: Terrain) {
     }
     g.vals = centroid(ms.map(valsOf));
     const leader = findById(w.people, g.leader);
-    if (!leader?.alive || leader.group !== g.id || chance(w, 0.05)) {
+    // 왕은 함부로 바뀌지 않는다 (나라는 왕위를 잇는다)
+    if (g.kind !== "nation" && (!leader?.alive || leader.group !== g.id || chance(w, 0.05))) {
       const next = pickLeader(w, ms);
       if (next && next.id !== g.leader && leader?.alive === 0) {
         chron(w, "society", `${josa(next.name, "이/가")} '${groupTitle(w, g)}'${josa(groupTitle(w, g), "을/를").slice(groupTitle(w, g).length)} 이끌게 되었다.`);
@@ -398,6 +409,7 @@ export function dailySociety(w: WorldState, T: Terrain) {
 
 /** 뜻이 모두 맞으면 문명을, 너무 벌어지면 분열을 */
 function civilizationCheck(w: WorldState, T: Terrain, adults: Person[]) {
+  if (w.groups.some((g) => g.kind === "nation")) return;
   const civ = w.groups.find((g) => g.kind === "civ");
   if (civ) {
     const ms = membersOf(w, civ).filter((p) => adult(w, p));
@@ -444,7 +456,8 @@ function civilizationCheck(w: WorldState, T: Terrain, adults: Person[]) {
 
 /** 무리 사이의 긴장 → 다툼 → 화해나 분열 */
 function rivalry(w: WorldState, T: Terrain) {
-  const orgs = w.groups.filter((g) => g.kind === "org");
+  // 조직끼리, 그리고 나라와 나라 밖 조직 사이
+  const orgs = w.groups.filter((g) => g.kind === "org" || g.kind === "nation");
   const pop = living(w).length;
   const deficit = clamp((pop * 8 - foodTotal(w)) / Math.max(1, pop * 8), 0, 1);
   for (const a of orgs) {
@@ -488,7 +501,7 @@ function rivalry(w: WorldState, T: Terrain) {
     const power = (g: Group) => membersOf(w, g).filter((p) => adult(w, p)).reduce((s, p) => s + p.health / 100 + (p.role === "guard" ? 0.5 : 0), 0);
     const weak = power(a) < power(b) ? a : b;
     const strong = weak === a ? b : a;
-    if ((t > 0.8 || chance(w, 0.4)) && !weak.camp) {
+    if ((t > 0.8 || chance(w, 0.4)) && !weak.camp && weak.kind !== "nation") {
       const site = findSite(w, T, "leanto", undefined, { min: 22, max: 34 });
       if (site) {
         weak.camp = { x: site.x, z: site.z };

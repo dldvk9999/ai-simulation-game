@@ -1,5 +1,6 @@
 import { ANIMAL_SPEED, DAY, HOUR, TIME_SCALE } from "./constants";
 import { FISH_INFO } from "./data";
+import { blessed } from "./religion";
 import { hourOf, seasonOf } from "./clock";
 import { chance, pick, pRate, rand, range } from "./rng";
 import type { Terrain } from "./terrain";
@@ -210,8 +211,10 @@ export function dailyAnimals(w: WorldState, T: Terrain) {
     const tame = list.filter((a) => a.tame);
     if (list.length < ANIMAL_CAP[kind] && wild.length >= 2 && season !== 3) {
       const births = Math.floor(wild.length / 2);
+      // 풍요제가 통하면 짐승이 더 자주 새끼를 친다
+      const pBirth = 0.3 * (1 + 0.7 * blessed(w, "bounty"));
       for (let i = 0; i < births; i++) {
-        if (chance(w, 0.3) && list.length + i < ANIMAL_CAP[kind]) {
+        if (chance(w, pBirth) && list.length + i < ANIMAL_CAP[kind]) {
           const mom = pick(w, wild);
           w.animals.push(makeAnimal(w, kind, mom.x + range(w, -1, 1), mom.z + range(w, -1, 1), w.time));
           bump(w);

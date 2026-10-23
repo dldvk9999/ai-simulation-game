@@ -5,6 +5,7 @@ import { hourOf } from "./clock";
 import { BARE_HANDS, HOUSE_TYPES, STRUCTS, TECH_BY_ID, WEAPONS } from "./data";
 import { harm, maxHp } from "./building";
 import { shiftMorale } from "./morale";
+import { blessed } from "./religion";
 import { age, die, feel, lying, say } from "./people";
 import { chance, int, range } from "./rng";
 import { addResearch, available } from "./settlement";
@@ -53,7 +54,8 @@ export function dailyBeasts(w: WorldState) {
   if (w.time < (w.timers.beast ?? 0) || w.timers.beastAt || w.time < 18 * DAY) return;
   // 사람이 몇 모여 살기 시작해야 맹수의 눈에 띈다
   if (w.beasts.some((b) => b.st !== "dead") || living(w).length < 4) return;
-  if (!chance(w, DAILY_CHANCE)) return;
+  // 수호제는 맹수를 덜 부르고, 저주는 더 부른다
+  if (!chance(w, DAILY_CHANCE * (1 - 0.35 * blessed(w, "peace") + 0.3 * blessed(w, "curse")))) return;
   const h = chance(w, 0.6) ? range(w, 18, 23.5) : range(w, 6, 18);
   w.timers.beastAt = w.time + h * HOUR;
 }

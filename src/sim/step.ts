@@ -11,6 +11,9 @@ import { METAL_INFO } from "./data";
 import { dailyMorale } from "./morale";
 import { checkDeath, dailyPeople, hourlyPeople, makeCtx, perceive, updateEmotions, updateNeeds } from "./people";
 import { chooseFocus, foodTotal, houseCapacity, planFarms, planProject } from "./settlement";
+import { dailyEconomy } from "./economy";
+import { dailyReligion } from "./religion";
+import { dailyNation, updateNation } from "./nation";
 import { dailySociety } from "./society";
 import { getTerrain } from "./terrain";
 import { josa } from "./text";
@@ -32,6 +35,7 @@ export function step(w: WorldState, dt: number) {
   updateFish(w, T, dt);
   updateStructures(w, dt);
   updateFires(w, T, dt);
+  updateNation(w, T, dt);
   updateItems(w, T, dt);
 
   const ctx = makeCtx(w, T);
@@ -69,6 +73,9 @@ function daily(w: WorldState) {
   dailyAnimals(w, T);
   dailyPeople(w, T);
   dailySociety(w, T);
+  dailyReligion(w);
+  dailyEconomy(w);
+  dailyNation(w, T);
   dailyDisaster(w);
   dailyVoyage(w);
   dailyBeasts(w);

@@ -20,7 +20,7 @@ export interface PersonSummary {
 
 export interface GroupSummary {
   id: number;
-  kind: "org" | "civ";
+  kind: "org" | "civ" | "nation";
   title: string;
   stage: string;
   hue: number;
@@ -51,6 +51,9 @@ export interface PersonDetail extends PersonSummary {
   illName: string;
   groupName: string;
   view: string;
+  /** 믿는 종교 · 가진 돈과 꾸러미 */
+  faith: string;
+  wallet: string;
 }
 
 /** 눌러 본 건물 */
@@ -103,6 +106,13 @@ export interface HudState {
   beast: { name: string; icon: string; count: number } | null;
   /** 타오르는 불길 수와 그중 건물에 붙은 불 */
   fire: { count: number; houses: number } | null;
+  /** 나라 · 바다 건너 배 · 효험 */
+  nation: { name: string; king: string; gov: string; ministers: string; foreign: { name: string; mood: string; war: boolean }[] } | null;
+  ship: { name: string; war: boolean } | null;
+  blessings: { icon: string; name: string }[];
+  /** 종교와 경제 (사람들 패널) */
+  faiths: { name: string; icon: string; wish: string; count: number; rites: number }[];
+  economy: { currency: string; treasury: string; trades: number } | null;
   structId: number | null;
   structure: StructDetail | null;
   selectedId: number | null;
@@ -145,6 +155,11 @@ export const useHud = create<HudState>(() => ({
   morale: 70,
   beast: null,
   fire: null,
+  nation: null,
+  ship: null,
+  blessings: [],
+  faiths: [],
+  economy: null,
   structId: null,
   structure: null,
   selectedId: null,

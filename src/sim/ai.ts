@@ -15,6 +15,9 @@ import { countermeasure, damaged, floodPeak, repairCost, tsunamiThreat } from ".
 import { discoverIngredient, giveMed, illOf, infect, infirmary, isolated, medForP } from "./disease";
 import { isTree } from "./ecology";
 import { douseArrive, douseFinish, dousePlan, dousersOf, fireEdge, fireToFight, fleePlan, threatens } from "./fire";
+import { blessed, riteCand, riteFinish, riteStart } from "./religion";
+import { payWage, tradeArrive, tradeCand, tradeFinish } from "./economy";
+import { atWar, musterCand } from "./nation";
 import { clamp } from "./noise";
 import {
   age, Ctx, dominant, feel, homeOf, isAdult, lying, mood, nearFire, say,
@@ -57,7 +60,9 @@ const ROLE_TAGS: Record<Role, string[]> = {
   healer: ["nurse", "dig", "gather:herb", "craft:herbal", "craft:remedy", "craft:medicine"],
   cook: ["cook", "tend", "makefire"],
   sailor: ["fish", "board"],
-  guard: ["fight", "defend"],
+  guard: ["fight", "defend", "muster"],
+  king: ["council", "chat"],
+  minister: ["council", "think", "trade"],
 };
 const roleBoost = (p: Person, tag: string) =>
   p.role && ROLE_TAGS[p.role].some((t) => tag === t || tag.startsWith(t + ":")) ? 0.22 : 0;
@@ -215,13 +220,13 @@ function track(w: WorldState, p: Person, a: Act) {
       return false;
     }
   }
-  if (a.ph === 0 && (a.k === "follow" || a.k === "chat" || a.k === "nurse" || a.k === "fight") && a.tid != null) {
+  if (a.ph === 0 && (a.k === "follow" || a.k === "chat" || a.k === "nurse" || a.k === "fight" || (a.k === "trade" && a.sub === "buy")) && a.tid != null) {
     const q = findById(w.people, a.tid);
     if (!q || !onIsland(q)) {
       abort(p);
       return false;
     }
-    if (a.k === "follow" || a.k === "nurse" || a.k === "fight") {
+    if (a.k === "follow" || a.k === "nurse" || a.k === "fight" || a.k === "trade") {
       const s = spot(p, q.x, q.z, a.k === "fight" ? 0.9 : 1.2);
       a.tx = s.x;
       a.tz = s.z;
@@ -334,6 +339,9 @@ function animFor(a: Act): Anim {
     case "defend": return a.sub === "tower" || weaponOf(a.sub).range > 3 ? "aim" : "slash";
     case "hide": return "cower";
     case "design": return "think";
+    case "rite": return "pray";
+    case "trade": return "talk";
+    case "muster": return weaponOf(a.sub).range > 3 ? "aim" : "slash";
     case "carried": return "held";
     case "douse": return a.sub === "scoop" ? "scoop" : a.sub === "throw" ? "douse" : "bucket";
     case "flee": return "startle";
@@ -392,6 +400,7 @@ function start(w: WorldState, ctx: Ctx, p: Person, a: Act | null) {
     case "hide": say(w, p, "hide", {}, "🫣", true); break;
     case "design": say(w, p, "design", {}, "📐"); break;
     case "douse": say(w, p, "douse", {}, "🪣", true); break;
+    case "rite": riteStart(w, p, a); break;
     case "flee": say(w, p, "fireHot", {}, "🔥", true); break;
     case "mourn": {
       const dead = findById(w.people, p.grief?.id);
@@ -507,6 +516,10 @@ function arrive(w: WorldState, ctx: Ctx | null, p: Person, a: Act) {
       const st = findById(w.structures, a.tid);
       if (!st || st.plan !== 0) return abort(p);
       p.rot = Math.atan2(st.z - p.z, st.x - p.x);
+      break;
+    }
+    case "trade": {
+      if (!tradeArrive(w, p, a)) return abort(p);
       break;
     }
     case "fuss": case "assist": case "follow": {
@@ -692,6 +705,8 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
   }
   switch (a.k) {
     case "care": careFinish(w, ctx, p, a); break;
+    case "rite": riteFinish(w, p, a); break;
+    case "trade": tradeFinish(w, p, a); break;
     case "fuss": fussFinish(w, p, a); break;
     case "assist": assistFinish(w, p, a); break;
     case "unconscious": {
@@ -1003,7 +1018,8 @@ function carryHome(w: WorldState, ctx: Ctx, p: Person, a: Act, res: Res, qty: nu
 
 function deposit(w: WorldState, p: Person) {
   if (!p.carry) return;
-  addStock(w, p.carry.res, p.carry.qty);
+  // 품삯을 받고, 가끔은 하나를 제 몫으로 챙긴다
+  addStock(w, p.carry.res, payWage(w, p, p.carry.res, p.carry.qty));
   p.carry = null;
 }
 
@@ -1339,7 +1355,8 @@ function huntChance(w: WorldState, an: Animal) {
     boar: [0.03, 0.38, 0.65],
   };
   const [b0, b1, b2] = base[an.kind];
-  return bow ? b2 : spear ? b1 : b0;
+  // 풍요제가 통하면 사냥도 조금 더 잘 된다
+  return Math.min(0.95, (bow ? b2 : spear ? b1 : b0) * (1 + 0.15 * blessed(w, "bounty")));
 }
 
 function planHunt(w: WorldState, ctx: Ctx, p: Person, prefer?: Animal): Act | null {
@@ -1855,6 +1872,20 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   }
   // 아이를 먹이고, 달래고, 놀아 주고, 재우고, 혼낸다
   if (yrs >= 14 && lv < 3) careCands(w, p, add);
+  // 믿는 종교가 의식을 올리자고 부르면 제단으로
+  if (yrs >= 16 && lv < 3) {
+    const rc = riteCand(w, p);
+    if (rc) add("rite", rc.s, rc.mk);
+  }
+  // 다른 나라의 전함이 오면: 싸울 수 있는 백성은 바닷가로, 나머지는 집 안으로
+  const mc = musterCand(w, T, p);
+  if (mc) add("muster", mc.s, mc.mk);
+  else if (atWar(w) && (yrs < 16 || yrs > 60 || p.health < 40)) add("shelter", 1.15, () => shelterPlan(w, ctx, p));
+  // 갖고 싶은 것을 사고, 넘치게 챙긴 것은 판다
+  if (yrs >= 16 && lv < 2) {
+    const tc = tradeCand(w, p);
+    if (tc) add("trade", tc.s, tc.mk);
+  }
 
   // 맹수가 나타났을 때: 싸울 수 있는 사람은 무기를 들고, 나머지는 집으로 숨는다
   if (bst) {
@@ -2194,6 +2225,7 @@ export const ACT_LABEL: Record<ActKind, string> = {
   defend: "맹수와 맞서 싸우는 중", hide: "맹수를 피해 숨은 중", design: "건물을 설계하는 중",
   douse: "물을 퍼 날라 불을 끄는 중", flee: "불길을 피해 달아나는 중",
   carried: "품에 안겨 있는 중", fuss: "보채는 중", assist: "어른 일을 거드는 중",
+  rite: "제단에서 의식을 올리는 중", trade: "물건을 사고파는 중", muster: "나라를 지키러 바닷가에 모인 중",
 };
 
 const FUSS_LABEL: Record<string, string> = {

@@ -276,6 +276,11 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     morale: 70,
     designs: [],
     blazes: [],
+    religions: [],
+    blessings: [],
+    economy: null,
+    nations: [],
+    visit: null,
   };
 
   // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
@@ -442,7 +447,19 @@ export function migrateWorld(w: WorldState) {
   w.timers.beast ??= w.time + 3 * DAY;
   w.history.beast ??= 0;
   w.history.lastBeast ??= 0;
+  // 저장할 때 뺀 식물의 0 값을 채운다
+  for (const p of w.plants) {
+    p.fruit ??= 0;
+    p.stump ??= 0;
+    p.regrow ??= 0;
+    p.burn ??= 0;
+  }
   w.blazes ??= [];
+  w.religions ??= [];
+  w.blessings ??= [];
+  w.economy ??= null;
+  w.nations ??= [];
+  w.visit ??= null;
   w.history.fire ??= 0;
   w.history.lastFire ??= 0;
   for (const p of w.people) {

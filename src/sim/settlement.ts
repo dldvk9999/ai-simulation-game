@@ -3,6 +3,9 @@ import { ageYears } from "./clock";
 import { newProject } from "./building";
 import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
 import { moraleMul, shiftMorale } from "./morale";
+import { needShrine } from "./religion";
+import { wantMarket } from "./economy";
+import { govMul, wantPalace } from "./nation";
 import { range, rand } from "./rng";
 import type { Terrain } from "./terrain";
 import { josa, thought } from "./text";
@@ -43,7 +46,10 @@ export function researchMul(w: WorldState) {
   // 조직을 이루면 체계적으로, 문명을 세우면 더욱 빠르게 배운다
   if (w.groups?.some((g) => g.kind === "civ")) m *= w.structures.some((s) => s.type === "hall" && s.prog >= 1) ? 1.32 : 1.25;
   else if (w.groups?.length) m *= 1.1;
-  return m * moraleMul(w) * ERA_PACE[currentEra(w)];
+  // 사람이 많아져도 깨침이 그만큼 곧바로 빨라지지는 않는다 (생각이 서로 겹친다)
+  const pop = living(w).length;
+  const crowd = Math.min(1, Math.max(0.42, Math.sqrt(14 / Math.max(14, pop))));
+  return m * moraleMul(w) * govMul(w) * crowd * ERA_PACE[currentEra(w)];
 }
 
 export function chooseFocus(w: WorldState) {
@@ -98,7 +104,7 @@ export function addResearch(w: WorldState, p: Person | null, pts: number, tech?:
   if (!id || knows(w, id)) return;
   const def = TECH_BY_ID[id];
   if (!def || !def.prereq.every((q) => knows(w, q)) || !needsMet(w, def)) return;
-  const v = (w.tech.prog[id] ?? 0) + pts * researchMul(w) * (LIFESAVING.has(id) ? 2.5 : 1);
+  const v = (w.tech.prog[id] ?? 0) + pts * researchMul(w) * (LIFESAVING.has(id) ? 3.5 : 1);
   w.tech.prog[id] = v;
   if (v >= def.cost) discover(w, p, id);
 }
@@ -305,7 +311,20 @@ export function planProject(w: WorldState, T: Terrain) {
   if (knows(w, "hut") && w.groups?.some((g) => g.kind === "civ") && !has(w, "hall")) want.push("hall");
   if (best && cap < pop + 2 && pop >= 3) want.push(best);
   if (knows(w, "stoneaxe") && count("bench") < Math.min(3, 1 + Math.floor(pop / 4))) want.push("bench");
+  // 나라를 세우면 왕궁을
+  if (wantPalace(w)) want.unshift("palace");
+  // 돈이 돌기 시작하면 장터를 세운다
+  if (wantMarket(w) && knows(w, "polished")) want.push("market");
 
+  // 믿는 사람이 셋 넘는 종교는 제단을 쌓는다
+  const faith = needShrine(w);
+  if (faith && knows(w, "agriculture")) {
+    const site = findSite(w, T, "shrine");
+    if (site) {
+      newProject(w, "shrine", site).faith = faith.id;
+      return;
+    }
+  }
   for (const t of want) {
     const site = t === "mine" ? findSite(w, T, t, T.mine, { min: T.mine.r * 0.8, max: T.mine.r * 1.35 }) : findSite(w, T, t);
     if (site) {

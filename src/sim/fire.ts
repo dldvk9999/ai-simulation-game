@@ -45,7 +45,9 @@ function alarm(w: WorldState, b: Blaze) {
 /** 건물에 불이 붙는다 (불에 강한 재질이면 잘 붙지 않는다) */
 export function igniteStructure(w: WorldState, s: Structure, why: Blaze["why"]) {
   if (!burnable(s) || burningOf(w, s) || w.blazes.length >= MAX_BLAZES) return null;
-  const b: Blaze = { id: newId(w), x: s.x, z: s.z, r: STRUCTS[s.type].radius + 0.6, max: STRUCTS[s.type].radius + 0.6, heat: 0.3, sid: s.id, fuel: 0, t: w.time, why, by: [] };
+  // 처음엔 한쪽 구석에서 타오르다 건물 전체로 번진다
+  const R = STRUCTS[s.type].radius;
+  const b: Blaze = { id: newId(w), x: s.x, z: s.z, r: R * 0.6, max: R + 1.4, heat: 0.3, sid: s.id, fuel: 0, t: w.time, why, by: [] };
   w.blazes.push(b);
   remember(w);
   addFx(w, "ignite", s.x, s.z, s.id);
@@ -145,12 +147,13 @@ export function updateFires(w: WorldState, T: Terrain, dt: number) {
     if (!s) {
       b.fuel -= dt;
       b.r = Math.min(b.max, b.r + h * 2.5 * b.heat);
-    }
+    } else b.r = clamp(b.r + h * (b.heat > 0.4 ? 1.2 : -0.6) * b.heat, STRUCTS[s.type].radius * 0.5, b.max);
     if (b.heat <= 0.02) {
       putOut(w, b, s);
       continue;
     }
-    if (s) burnStructure(w, T, s, (s.fp ? 0.1 : 0.42) * b.heat * h);
+    // 불길이 클수록 (세고 넓고 곁에 함께 타는 불이 많을수록) 내구도가 빨리 깎인다
+    if (s) burnStructure(w, T, s, burnRate(w, b, s) * h);
     // 번진다
     const pSpread = pRate((b.heat * (s ? 0.55 : 0.8)) / HOUR, dt);
     for (const o of w.structures) {
@@ -180,6 +183,22 @@ export function updateFires(w: WorldState, T: Terrain, dt: number) {
     }
   }
 }
+
+/** 불길의 규모 0..1+: 세기 × 번진 넓이 × 곁에서 함께 타는 불 */
+export function fireScale(w: WorldState, b: Blaze) {
+  const s = b.sid != null ? findById(w.structures, b.sid) : undefined;
+  const r0 = s ? STRUCTS[s.type].radius * 0.5 : 2;
+  const spread = clamp((b.r - r0) / Math.max(0.5, b.max - r0), 0, 1);
+  const near = w.blazes.filter((x) => x !== b && dist(x.x, x.z, b.x, b.z) < 12).length;
+  return b.heat * (0.55 + 0.45 * spread) * (1 + 0.3 * Math.min(3, near));
+}
+
+/** 시간당 내구도가 깎이는 비율 (최대 내구도에 견줘) */
+export function burnRate(w: WorldState, b: Blaze, s: Structure) {
+  return (s.fp ? 0.12 : 0.55) * fireScale(w, b);
+}
+
+export const scaleName = (k: number) => (k < 0.3 ? "작은 불" : k < 0.65 ? "번지는 불" : "큰 불");
 
 function burnStructure(w: WorldState, T: Terrain, s: Structure, amount: number) {
   if (s.prog < 1) {
@@ -277,7 +296,9 @@ export function waterFor(w: WorldState, T: Terrain, x: number, z: number) {
 /** 불길 가장자리: 사람이 서서 물을 끼얹는 자리 */
 export function fireEdge(b: Blaze, p: Person) {
   const a = Math.atan2(p.z - b.z, p.x - b.x);
-  return { x: b.x + Math.cos(a) * (b.r + 0.9), z: b.z + Math.sin(a) * (b.r + 0.9) };
+  // 건물이 무너져도 다치지 않을 만큼 떨어져서 끼얹는다
+  const r = Math.max(b.r, b.sid != null ? b.max - 0.4 : 0) + 1.1;
+  return { x: b.x + Math.cos(a) * r, z: b.z + Math.sin(a) * r };
 }
 
 /** 물을 끼얹는다 (항아리가 있으면 더 많이 담아 온다) */

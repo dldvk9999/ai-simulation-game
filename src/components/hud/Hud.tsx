@@ -101,6 +101,11 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
             </span>
           )}
           {s.war && <span className="chip alert">⚔️ 무리끼리 다툼</span>}
+          {s.nation && <span className="chip nation" title={`${s.nation.gov}${s.nation.ministers ? ` · ${s.nation.ministers}` : ""}`}>👑 {s.nation.name}</span>}
+          {s.ship && <span className={`chip ${s.ship.war ? "alert" : ""}`}>{s.ship.war ? `⚔️ ${s.ship.name} 전함` : `⛵ ${s.ship.name} 상선`}</span>}
+          {s.blessings.map((b) => (
+            <span key={b.name} className="chip bless" title="의식이 통하는 동안">{b.icon} {b.name}</span>
+          ))}
           {s.fire && (
             <span className="chip alert fire">
               🔥 {s.fire.houses ? `건물 ${s.fire.houses}채 화재` : "산불"}{s.fire.count > s.fire.houses && s.fire.houses ? ` · 산불 ${s.fire.count - s.fire.houses}` : ""}
@@ -195,7 +200,7 @@ function PersonRow({ p }: { p: PersonSummary }) {
 
 const groupColor = (hue: number) => `hsl(${Math.round(hue * 360)} 62% 55%)`;
 
-type GroupRow = Pick<GroupSummary, "id" | "title" | "stage" | "count" | "war" | "apart" | "leader"> & { hue: number | null; people: PersonSummary[] };
+type GroupRow = Pick<GroupSummary, "id" | "title" | "stage" | "count" | "war" | "apart" | "leader"> & { kind?: GroupSummary["kind"]; hue: number | null; people: PersonSummary[] };
 
 /** 무리 단위로 묶는다: 조직·문명, 무소속, 섬 밖에 나간 사람 */
 function useGroupRows(): GroupRow[] | null {
@@ -226,7 +231,7 @@ function GroupHeader({ g, open }: { g: GroupRow; open: boolean }) {
       <span className="chev">{open ? "▾" : "▸"}</span>
       <span className="gstage">
         {g.stage}
-        {g.leader && ` · 👑 ${g.leader}`}
+        {g.leader && ` · ${g.kind === "nation" ? "👑 왕" : "🎖️"} ${g.leader}`}
         {g.apart && " · 따로 터를 잡음"}
         {g.war && <b className="gwar"> · ⚔️ {g.war}와(과) 다툼</b>}
       </span>
@@ -312,6 +317,8 @@ function PersonCard() {
         {p.groupName && <div>🏳️ {p.groupName}{p.role && ` · ${p.role}`}</div>}
         {p.traits.length > 0 && <div>🧭 {p.traits.join(" · ")}</div>}
         <div>💭 뜻: {p.view}</div>
+        {p.faith && <div>🙏 {p.faith}</div>}
+        {p.wallet && <div>{p.wallet}</div>}
         <div>💗 {p.likes}</div>
         <div>🏠 {p.home}{p.carry && ` · 🎒 ${p.carry}`}</div>
         {p.family.length > 0 && <div>👪 {p.family.join(" · ")}</div>}
@@ -411,6 +418,7 @@ function PeopleDrawer() {
           {people.map((p) => <PersonItem key={p.id} p={p} />)}
         </ul>
       )}
+      <SocietyInfo />
       <h3>창고</h3>
       <div className="stock">
         {stock.length === 0 && <span className="sub">아직 모아둔 것이 없어요</span>}
@@ -421,6 +429,50 @@ function PeopleDrawer() {
         ))}
       </div>
     </div>
+  );
+}
+
+/** 나라 · 종교 · 경제 */
+function SocietyInfo() {
+  const nation = useHud((s) => s.nation);
+  const faiths = useHud((s) => s.faiths);
+  const eco = useHud((s) => s.economy);
+  if (!nation && !faiths.length && !eco) return null;
+  return (
+    <>
+      {nation && (
+        <>
+          <h3>👑 {nation.name}</h3>
+          <div className="society">
+            <div>왕 {nation.king} · {nation.gov}</div>
+            {nation.ministers && <div className="sub">{nation.ministers}</div>}
+            {nation.foreign.length > 0 && (
+              <div className="foreign">
+                {nation.foreign.map((n) => (
+                  <span key={n.name} className={`chip ${n.war ? "alert" : ""}`}>{n.war ? "⚔️" : "⛵"} {n.name} · {n.war ? "전쟁 중" : n.mood}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+      {faiths.length > 0 && (
+        <>
+          <h3>종교</h3>
+          <ul className="plist">
+            {faiths.map((f) => (
+              <li key={f.name}>{f.icon} <b>{f.name}</b> · {f.wish} · {f.count}명 · 의식 {f.rites}번</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {eco && (
+        <>
+          <h3>경제</h3>
+          <div className="society">{eco.currency} · 나라 곳간 {eco.treasury} · 거래 {eco.trades.toLocaleString()}번</div>
+        </>
+      )}
+    </>
   );
 }
 

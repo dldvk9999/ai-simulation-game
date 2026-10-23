@@ -9,6 +9,7 @@ import { isTree } from "./ecology";
 import { feel, lying, say } from "./people";
 import { chance, range, weighted } from "./rng";
 import { shiftMorale } from "./morale";
+import { blessed } from "./religion";
 import { available } from "./settlement";
 import type { Terrain } from "./terrain";
 import { josa } from "./text";
@@ -55,7 +56,8 @@ export function schedule(w: WorldState, type: DisasterType, start: number, power
 /** 하루에 한 번: 아주 드물게 재해가 다가온다 */
 export function dailyDisaster(w: WorldState) {
   if (w.disaster || w.time < (w.timers.disaster ?? 0)) return;
-  if (!chance(w, DAILY_CHANCE)) return;
+  // 저주 의식이 통하면 재해가 일어날 확률이 오르고, 수호제는 조금 낮춘다
+  if (!chance(w, DAILY_CHANCE * (1 - 0.3 * blessed(w, "peace") + 0.8 * blessed(w, "curse")))) return;
   const season = seasonOf(w.time);
   const typhoon = season === 1 ? 1.6 : season === 2 ? 1.1 : season === 0 ? 0.3 : 0;
   const type = weighted(w, { quake: 0.45, typhoon: 0.4 * typhoon, tsunami: 0.12 } as Record<DisasterType, number>);

@@ -3,6 +3,7 @@
 import { DAY, HOUR } from "./constants";
 import { seasonOf } from "./clock";
 import { MEDS, STRUCTS } from "./data";
+import { blessed } from "./religion";
 import { clamp } from "./noise";
 import { age, Ctx, feel, homeOf, say } from "./people";
 import { chance, pRate, range } from "./rng";
@@ -113,6 +114,7 @@ export function updateIllness(w: WorldState, ctx: Ctx, p: Person, dt: number) {
     if (yrs < 8 || yrs > 62) rate *= 1.4;
     if (p.health < 50) rate *= 1.4;
     if (p.outfit !== "rag") rate *= 0.75;
+    rate *= 1 - 0.25 * blessed(w, "health");
     if (chance(w, pRate(rate, dt))) infect(w, p, "cold");
     return;
   }
@@ -154,6 +156,10 @@ export function updateIllness(w: WorldState, ctx: Ctx, p: Person, dt: number) {
     down *= 1.6;
     up *= 0.5;
   }
+  // 치유 기도가 통하는 동안
+  const prayed = blessed(w, "health");
+  down *= 1 + 0.3 * prayed;
+  up *= 1 - 0.2 * prayed;
   const r = range(w, 0, 1);
   if (r < up) setLevel(w, p, lv + 1);
   else if (r < up + down) setLevel(w, p, lv - 1);

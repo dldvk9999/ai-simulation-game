@@ -102,10 +102,11 @@ export interface StructDef {
   use: Purpose;
 }
 
-export type Purpose = "home" | "defense" | "craft" | "food" | "store" | "civic" | "sea" | "mine" | "care" | "misc";
+export type Purpose = "home" | "defense" | "craft" | "food" | "store" | "civic" | "sea" | "mine" | "care" | "faith" | "trade" | "rule" | "misc";
 export const PURPOSE_NAME: Record<Purpose, string> = {
   home: "사람이 잠자는 곳", defense: "맹수를 막는 곳", craft: "도구를 만드는 곳", food: "먹을 것을 마련하는 곳", store: "물건을 쌓아 두는 곳",
-  civic: "함께 모이고 배우는 곳", sea: "바다로 나가는 곳", mine: "광석을 캐는 곳", care: "아픈 사람을 돌보는 곳", misc: "",
+  civic: "함께 모이고 배우는 곳", sea: "바다로 나가는 곳", mine: "광석을 캐는 곳", care: "아픈 사람을 돌보는 곳",
+  faith: "믿음을 모아 의식을 올리는 곳", trade: "물건을 사고파는 곳", rule: "왕이 나라를 다스리는 곳", misc: "",
 };
 
 export const STRUCTS: Record<StructureType, StructDef> = {
@@ -144,6 +145,9 @@ export const STRUCTS: Record<StructureType, StructDef> = {
   forge: { name: "대장간", cost: { stone: 16, wood: 10, clay: 4 }, work: 10, tech: "metallurgy", radius: 2.2, hp: 260, h: 2.6, use: "craft" },
   factory: { name: "공장", cost: { stone: 30, metal: 20, wood: 10 }, work: 30, tech: "steam", radius: 3.6, hp: 680, h: 3, use: "craft" },
   mine: { name: "광산", cost: { wood: 14, stick: 8, rope: 2 }, work: 10, tech: "mining", radius: 2.2, hp: 260, h: 2.4, use: "mine" },
+  shrine: { name: "제단", cost: { stone: 8, wood: 3 }, work: 4, tech: "agriculture", radius: 1.7, hp: 140, h: 2.4, use: "faith" },
+  market: { name: "장터", cost: { wood: 8, stick: 6, fiber: 4 }, work: 5, tech: "polished", radius: 2.6, hp: 110, h: 2.2, use: "trade" },
+  palace: { name: "왕궁", cost: { stone: 30, wood: 18, metal: 4 }, work: 26, tech: "masonry", radius: 4.2, hp: 760, h: 5.2, use: "rule" },
 };
 
 export const HOUSE_TYPES: StructureType[] = ["leanto", "hut", "loghouse", "stonehouse", "townhouse", "apartment"];
@@ -152,7 +156,7 @@ export const HOUSE_TYPES: StructureType[] = ["leanto", "hut", "loghouse", "stone
 export const STORIED = new Set<StructureType>(["townhouse", "apartment", "watchtower", "fort", "factory"]);
 /** 설계 없이 바로 짓는 작은 것들 */
 /** 나무로 지어 불이 붙고 바람·지진에 약한 건물 */
-export const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard", "watchtower", "mine"]);
+export const WOODEN = new Set<StructureType>(["leanto", "hut", "loghouse", "storage", "rack", "workshop", "pen", "dock", "bench", "infirmary", "hall", "farm", "windmill", "shipyard", "watchtower", "mine", "market"]);
 export const NO_DESIGN = new Set<StructureType>(["campfire", "grave", "raft", "banner", "farm", "bench", "leanto", "rack", "pen"]);
 
 export interface Recipe {
@@ -274,9 +278,9 @@ export const FISH_INFO: Record<FishKind, { name: string; qty: number; depth: [nu
 
 export const ROLE_NAME: Record<Role, string> = {
   leader: "이끄는 사람", farmer: "농부", fisher: "어부", hunter: "사냥꾼", builder: "목수", scholar: "학자",
-  crafter: "장인", healer: "치유사", cook: "요리사", sailor: "뱃사람", guard: "지킴이",
+  crafter: "장인", healer: "치유사", cook: "요리사", sailor: "뱃사람", guard: "지킴이", king: "왕", minister: "대신",
 };
 export const ROLE_ICON: Record<Role, string> = {
-  leader: "👑", farmer: "🌾", fisher: "🎣", hunter: "🏹", builder: "🔨", scholar: "📖",
-  crafter: "🛠️", healer: "🌿", cook: "🍲", sailor: "⛵", guard: "🛡️",
+  leader: "🎖️", farmer: "🌾", fisher: "🎣", hunter: "🏹", builder: "🔨", scholar: "📖",
+  crafter: "🛠️", healer: "🌿", cook: "🍲", sailor: "⛵", guard: "🛡️", king: "👑", minister: "📜",
 };

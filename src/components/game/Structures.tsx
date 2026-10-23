@@ -451,6 +451,67 @@ function buildModel(type: StructureType, lv = 1): Model {
       parts.push(part(G.box, { color: "#c9b48a", pos: [-1.6, 0.62, 1.7], scale: [0.6, 0.18, 0.6] }));
       return { geo: merge(parts) };
     }
+    case "shrine": {
+      // 돌 제단: 층계 위에 제물상, 양쪽 돌기둥 위로 등불이 밝다
+      const parts = [
+        part(G.box, { color: STONE_D, pos: [0, 0.15, 0], scale: [3.2, 0.3, 3.2] }),
+        part(G.box, { color: STONE, pos: [0, 0.4, 0], scale: [2.4, 0.22, 2.4] }),
+        part(G.box, { color: "#b9b2a5", pos: [-0.3, 0.85, 0], scale: [1.1, 0.7, 0.9] }),
+        part(G.box, { color: "#b23a3a", pos: [-0.3, 1.22, 0], scale: [1.15, 0.05, 0.95] }),
+        part(G.dodec(0.18), { color: "#e6c06a", pos: [-0.3, 1.38, 0.2] }),
+        part(G.ico(0.12, 0), { color: "#d9504a", pos: [-0.3, 1.33, -0.22] }),
+        // 뒤편의 선돌
+        part(G.box, { color: STONE_D, pos: [-1.1, 1.3, 0], scale: [0.35, 2.2, 0.8], rot: [0, 0, 0.04] }),
+        part(G.box, { color: "#c9c2b5", pos: [-1.1, 2.45, 0], scale: [0.4, 0.12, 0.9] }),
+      ];
+      for (const z of [-1.2, 1.2]) {
+        parts.push(part(G.cyl(0.13, 0.16, 1.7, 6), { color: STONE, pos: [0.9, 1.0, z] }));
+        parts.push(part(G.box, { color: WOOD_D, pos: [0.9, 1.92, z], scale: [0.36, 0.08, 0.36] }));
+      }
+      return {
+        geo: merge(parts),
+        windows: merge([-1.2, 1.2].map((z) => part(G.box, { color: "#ffffff", pos: [0.9, 2.08, z], scale: [0.24, 0.24, 0.24] }))),
+      };
+    }
+    case "market": {
+      // 장터: 알록달록한 차양 아래 좌판 셋
+      const parts = [part(G.box, { color: "#c9b48a", pos: [0, 0.03, 0], scale: [5.0, 0.06, 4.4] })];
+      const awn = ["#e07a5f", "#f2cc8f", "#81b29a"];
+      [[-1.5, -1.2], [1.5, -1.2], [0, 1.4]].forEach(([x, z], i) => {
+        for (const [dx, dz] of [[-0.6, -0.45], [0.6, -0.45], [-0.6, 0.45], [0.6, 0.45]]) parts.push(part(G.cyl(0.04, 0.05, 1.8, 4), { color: WOOD_D, pos: [x + dx, 0.9, z + dz] }));
+        parts.push(part(G.box, { color: awn[i], pos: [x, 1.85, z], scale: [1.5, 0.08, 1.2], rot: [0.12, 0, 0] }));
+        parts.push(part(G.box, { color: WOOD, pos: [x, 0.62, z], scale: [1.3, 0.1, 0.8] }));
+        parts.push(part(G.box, { color: ["#d9504a", "#f4a261", "#6aa84f"][i], pos: [x - 0.35, 0.75, z], scale: [0.3, 0.16, 0.3] }));
+        parts.push(part(G.box, { color: ["#e9c46a", "#8d6e63", "#4dabf7"][i], pos: [x + 0.3, 0.75, z + 0.1], scale: [0.35, 0.18, 0.28] }));
+      });
+      return { geo: merge(parts) };
+    }
+    case "palace": {
+      // 왕궁: 돌 기단 위 흰 벽, 붉은 기둥, 겹지붕과 금빛 용마루
+      return {
+        geo: merge([
+          part(G.box, { color: STONE_D, pos: [0, 0.3, 0], scale: [8.6, 0.6, 7.4] }),
+          part(G.box, { color: STONE, pos: [3.6, 0.15, 0], scale: [1.6, 0.3, 2.6] }),
+          part(G.box, { color: CREAM, pos: [-0.4, 2.0, 0], scale: [6.0, 2.8, 5.6] }),
+          ...[-2.2, -0.75, 0.75, 2.2].map((z) => part(G.cyl(0.2, 0.22, 3.0, 8), { color: "#b03a2e", pos: [3.0, 2.0, z] })),
+          part(G.box, { color: "#d6c49c", pos: [0.3, 3.5, 0], scale: [7.4, 0.25, 6.6] }),
+          ...gable(7.4, 6.6, 1.5, 3.6, "#3f5872", CREAM),
+          part(G.box, { color: "#e7c35a", pos: [0.3, 5.15, 0], scale: [7.6, 0.16, 0.22] }),
+          part(G.box, { color: CREAM, pos: [-0.4, 4.6, 0], scale: [3.2, 1.0, 2.8] }),
+          ...gable(3.6, 3.2, 0.9, 5.1, "#3f5872", CREAM),
+          part(G.box, { color: "#e7c35a", pos: [-0.4, 6.05, 0], scale: [3.8, 0.12, 0.18] }),
+          part(G.box, { color: "#5a3b26", pos: [2.62, 1.4, 0], scale: [0.08, 2.0, 1.4] }),
+          part(G.cyl(0.05, 0.06, 2.6, 5), { color: WOOD_D, pos: [4.0, 1.6, 2.9] }),
+          part(G.box, { color: "#c0392b", pos: [4.0, 2.6, 3.25], scale: [0.04, 0.6, 0.7] }),
+          part(G.cyl(0.05, 0.06, 2.6, 5), { color: WOOD_D, pos: [4.0, 1.6, -2.9] }),
+          part(G.box, { color: "#c0392b", pos: [4.0, 2.6, -3.25], scale: [0.04, 0.6, 0.7] }),
+        ]),
+        windows: merge([
+          part(G.box, { color: "#ffffff", pos: [-0.4, 2.2, 2.82], scale: [1.4, 1.0, 0.05] }),
+          part(G.box, { color: "#ffffff", pos: [-0.4, 2.2, -2.82], scale: [1.4, 1.0, 0.05] }),
+        ]),
+      };
+    }
     case "forge": {
       // 화덕과 모루가 있는 대장간: 화덕 불빛은 밤에도 빛난다
       return {
@@ -533,12 +594,20 @@ const flameGeo = new THREE.ConeGeometry(0.32, 0.9, 7, 1, true);
 const flameInnerGeo = new THREE.ConeGeometry(0.18, 0.55, 6);
 const flameMat = new THREE.MeshBasicMaterial({ color: "#ff8a2a", transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide });
 const flameInnerMat = new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.95, depthWrite: false });
+/** 불타는 건물 위의 내구도 막대 */
+const barGeo = new THREE.PlaneGeometry(2.2, 0.22);
+const barBackMat = new THREE.MeshBasicMaterial({ color: "#2b2522", transparent: true, opacity: 0.75, depthTest: false });
+const barFillMats = Array.from({ length: 8 }, () => new THREE.MeshBasicMaterial({ color: "#7bd88f", depthTest: false, transparent: true }));
 /** 곁불: 가장자리의 붉은 불 혀 */
 const flameEdgeMat = new THREE.MeshBasicMaterial({ color: "#ff5a1f", transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
 const beamGeo = new THREE.ConeGeometry(2.2, 26, 16, 1, true).rotateZ(Math.PI / 2).translate(13, 0, 0);
 const beamMat = new THREE.MeshBasicMaterial({ color: "#fff3c4", transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
 
-function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
+/** 불타는 건물은 검게 그을린다 */
+const charMat = vcMat.clone();
+charMat.color.set("#7d6c62");
+
+function StructureMesh({ s, terrain }: { s: Structure & { burnt?: boolean }; terrain: Terrain }) {
   const model = modelOf(s.type, s.lv ?? 1);
   const def = STRUCTS[s.type];
   const planning = s.plan === 0 && s.prog < 1;
@@ -563,7 +632,7 @@ function StructureMesh({ s, terrain }: { s: Structure; terrain: Terrain }) {
   return (
     <group position={[s.x, groundY, s.z]} quaternion={tilt}>
       <group scale={[1, sy * (1 - dmg * 0.3), 1]} rotation={[dmg * 0.14, 0, dmg * 0.1]}>
-        <mesh geometry={model.geo} material={s.fp ? fpMat : vcMat} castShadow receiveShadow />
+        <mesh geometry={model.geo} material={s.burnt ? charMat : s.fp ? fpMat : vcMat} castShadow receiveShadow />
         {model.windows && <mesh geometry={model.windows} material={windowMat} />}
       </group>
       {dmg > 0 && (
@@ -608,9 +677,10 @@ export function Structures({ terrain }: { terrain: Terrain }) {
     const now = performance.now();
     if (now - last.current < 1500) return;
     last.current = now;
-    if (rt.world?.structures.some((s) => s.prog < 1)) setTick((t) => t + 1);
+    // 짓는 중이거나 불타는 건물이 있으면 모양(기울기·그을음)을 자주 고친다
+    if (rt.world?.structures.some((s) => s.prog < 1) || rt.world?.blazes.length) setTick((t) => t + 1);
   });
-  const list = useMemo(() => (rt.world ? rt.world.structures.map((s) => ({ ...s })) : []),
+  const list = useMemo(() => (rt.world ? rt.world.structures.map((s) => ({ ...s, burnt: rt.world!.blazes.some((b) => b.sid === s.id) })) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [version, tick]);
 
@@ -633,7 +703,9 @@ function Fires({ terrain }: { terrain: Terrain }) {
   const { camera } = useThree();
   const flames = useRef<THREE.Group>(null);
   const lights = useRef<THREE.PointLight[]>([]);
+  const bars = useRef<THREE.Group>(null);
   const POOL = 64;
+  const BARS = 8;
   useFrame((state) => {
     const w = rt.world;
     const g = flames.current;
@@ -684,6 +756,28 @@ function Fires({ terrain }: { terrain: Terrain }) {
       child.scale.set(f.s, f.s * flick, f.s);
       child.rotation.y = t * 1.5 + i;
     }
+    // 불타는 건물 위에 내구도 막대: 불길이 클수록 빨리 줄어든다
+    const bg = bars.current;
+    if (bg) {
+      const burning = (w.blazes ?? []).map((b) => (b.sid != null ? w.structures.find((s) => s.id === b.sid) : undefined)).filter((s): s is Structure => !!s);
+      for (let i = 0; i < BARS; i++) {
+        const bar = bg.children[i] as THREE.Group;
+        const s = burning[i];
+        if (!s) {
+          bar.visible = false;
+          continue;
+        }
+        bar.visible = true;
+        const k = Math.max(0, 1 - (s.dmg ?? 0));
+        bar.position.set(s.x, terrain.height(s.x, s.z) + heightOf(s) * 0.85 + 0.9, s.z);
+        bar.scale.setScalar(1.4);
+        bar.quaternion.copy(camera.quaternion);
+        const fill = bar.children[1] as THREE.Mesh;
+        fill.scale.x = Math.max(0.001, k);
+        fill.position.x = -(1 - k) * 1.1;
+        (fill.material as THREE.MeshBasicMaterial).color.set(k > 0.6 ? "#7bd88f" : k > 0.3 ? "#ffd43b" : "#ff6b6b");
+      }
+    }
     for (let i = 0; i < lights.current.length; i++) {
       const L = lights.current[i];
       const f = fires[i];
@@ -698,6 +792,14 @@ function Fires({ terrain }: { terrain: Terrain }) {
   });
   return (
     <>
+      <group ref={bars}>
+        {Array.from({ length: BARS }, (_, i) => (
+          <group key={i} visible={false}>
+            <mesh geometry={barGeo} material={barBackMat} scale={[1.05, 1.25, 1]} renderOrder={20} />
+            <mesh geometry={barGeo} material={barFillMats[i]} position-z={0.01} renderOrder={21} />
+          </group>
+        ))}
+      </group>
       <group ref={flames}>
         {Array.from({ length: POOL }, (_, i) => (
           <group key={i} visible={false}>

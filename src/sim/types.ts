@@ -123,7 +123,9 @@ export type StructureType =
   | "farm" | "pen" | "well" | "workshop" | "smelter" | "dock" | "library" | "windmill"
   | "observatory" | "lighthouse" | "grave" | "raft" | "bench"
   | "infirmary" | "seawall" | "banner" | "hall" | "shipyard" | "portal"
-  | "watchtower" | "fort" | "battery" | "townhouse" | "apartment" | "forge" | "factory" | "mine";
+  | "watchtower" | "fort" | "battery" | "townhouse" | "apartment" | "forge" | "factory" | "mine"
+  /** 종교의 제단 · 장터 · 왕궁 */
+  | "shrine" | "market" | "palace";
 
 export interface Structure {
   id: number;
@@ -155,6 +157,8 @@ export interface Structure {
   plan?: number;
   /** 불에 강한 재질(기와·흙벽)로 지었다 */
   fp?: number;
+  /** 어느 종교의 제단인지 */
+  faith?: number;
 }
 
 export type Emotion = "joy" | "sadness" | "fear" | "anger" | "surprise" | "love";
@@ -175,7 +179,9 @@ export type ActKind =
   /** 불 끄기 · 불길에서 달아나기 */
   | "douse" | "flee"
   /** 아기는 안겨 다니고, 어린이는 떼쓰고 조르고 울고, 일곱 살부터는 어른 일을 거든다 */
-  | "carried" | "fuss" | "assist";
+  | "carried" | "fuss" | "assist"
+  /** 제단에서 올리는 의식 · 물건 바꾸기 · 나라를 지키러 바닷가에 모이기 */
+  | "rite" | "trade" | "muster";
 
 export type Anim =
   | "idle" | "walk" | "run" | "chop" | "pick" | "sit" | "sleep" | "eat" | "think" | "knap"
@@ -256,6 +262,11 @@ export interface Person {
   away?: { until: number; via: "ship" | "portal"; trip: number } | null;
   /** 열 살이 되기 전의 마음: 바라는 것과 말썽, 혼난 뒤 얌전한 시간 */
   kid?: KidMind;
+  /** 믿는 종교 */
+  faith?: number | null;
+  /** 가진 돈과 제 몫으로 챙긴 물건 */
+  purse?: number;
+  pack?: Stock;
 }
 
 export type KidWant = "hungry" | "play" | "tantrum" | "cry" | "cling" | "sleepy";
@@ -273,9 +284,21 @@ export interface KidMind {
 }
 
 export type Role =
-  | "leader" | "farmer" | "fisher" | "hunter" | "builder" | "scholar" | "crafter" | "healer" | "cook" | "sailor" | "guard";
+  | "leader" | "farmer" | "fisher" | "hunter" | "builder" | "scholar" | "crafter" | "healer" | "cook" | "sailor" | "guard"
+  /** 나라의 왕과 대신 */
+  | "king" | "minister";
 
-export type GroupKind = "org" | "civ";
+export type GroupKind = "org" | "civ" | "nation";
+
+/** 나라의 정부: 왕정 → 왕과 대신들 → 의회를 둔 왕정 */
+export interface Government {
+  kind: "monarchy" | "cabinet" | "parliament";
+  /** 재상 · 장군 · 재무관 */
+  chancellor?: number | null;
+  general?: number | null;
+  treasurer?: number | null;
+  since: number;
+}
 
 export interface Group {
   id: number;
@@ -294,6 +317,72 @@ export interface Group {
   lastWar?: number;
   /** 문명 안에서 뜻이 벌어진 날이 쌓인 정도 */
   strain?: number;
+  /** 나라: 세운 날, 정부 */
+  crowned?: number;
+  gov?: Government;
+}
+
+/** 종교가 비는 것: 단비(풍년) · 풍요 · 무병 · 수호 · 저주 */
+export type Faith = "rain" | "bounty" | "health" | "peace" | "curse";
+
+export interface Religion {
+  id: number;
+  name: string;
+  aim: Faith;
+  founded: number;
+  hue: number;
+  /** 의식을 올리자고 부른 시각 (0이면 없음)과 모인 사람 */
+  call: number;
+  gathered: number[];
+  lastRite: number;
+  rites: number;
+  /** 저주가 향하는 무리 */
+  target?: number | null;
+}
+
+/** 의식이 통한 동안의 효험 */
+export interface Blessing {
+  aim: Faith;
+  until: number;
+  power: number;
+  by: number;
+}
+
+/** 경제: 지금 쓰는 화폐(시대), 나라 곳간, 거래 수 */
+export interface Economy {
+  era: number;
+  treasury: number;
+  trades: number;
+  started: number;
+}
+
+/** 바다 건너의 다른 나라 */
+export interface Nation {
+  id: number;
+  name: string;
+  hue: number;
+  /** 국력, 우리 나라를 대하는 마음 (-1 적대 … 1 우호), 있는 쪽 (각도) */
+  power: number;
+  mood: number;
+  /** 타고난 기질: 마음이 이쪽으로 돌아온다 (-0.6 호전적 … 0.5 온화) */
+  temper?: number;
+  /** 무역한 횟수 */
+  trades?: number;
+  dir: number;
+  met: number;
+  lastTrade: number;
+  war: { since: number; until: number } | null;
+  lastWar?: number;
+}
+
+/** 다른 나라의 배가 와 있다: 무역선 또는 전함 */
+export interface Visit {
+  nation: number;
+  kind: "trade" | "war";
+  arrive: number;
+  until: number;
+  /** 싸움에서 우리가 이긴 정도 (-1 … 1) */
+  score?: number;
 }
 
 export type DisasterType = "quake" | "typhoon" | "tsunami";
@@ -363,7 +452,7 @@ export interface Beast {
 
 export type ChronicleKind =
   | "arrive" | "discover" | "build" | "birth" | "death" | "couple" | "weather" | "gift" | "era" | "misc" | "season"
-  | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family";
+  | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family" | "faith" | "trade" | "nation";
 
 export interface ChronicleEntry {
   t: number;
@@ -375,7 +464,7 @@ export type FxType =
   | "hit" | "spark" | "ignite" | "fizzle" | "chip" | "shake" | "splash" | "lightning" | "eureka"
   | "drop" | "stun" | "complete" | "birth" | "arrive" | "catch" | "chop"
   | "dust" | "heal" | "clash" | "portal" | "collapse"
-  | "roar" | "shot" | "bite" | "crack" | "douse" | "cry";
+  | "roar" | "shot" | "bite" | "crack" | "douse" | "cry" | "coin" | "pray";
 
 export interface Fx {
   id: number;
@@ -428,6 +517,8 @@ export interface WorldState {
     beast?: number; lastBeast?: number;
     /** 불이 난 횟수와 마지막 시각 */
     fire?: number; lastFire?: number;
+    /** 마지막으로 비가 온 시각 (기우제) */
+    lastRain?: number;
   };
   /** 찾아낸 약재 원료 · 광맥 · 금속 */
   found: string[];
@@ -443,6 +534,13 @@ export interface WorldState {
   // ─── v4 ───
   /** 타오르는 불길 */
   blazes: Blaze[];
+  // ─── v5 ───
+  religions: Religion[];
+  blessings: Blessing[];
+  economy: Economy | null;
+  /** 바다 건너의 나라들과 지금 와 있는 배 */
+  nations: Nation[];
+  visit: Visit | null;
 }
 
 /** 불길: 건물에 붙었거나(sid) 번개·관찰자의 불씨로 땅에 번진 불 */

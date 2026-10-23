@@ -3,16 +3,27 @@ import { pick, RngHolder } from "./rng";
 export const NAMES_M = [
   "도윤", "서준", "하준", "은우", "시우", "지호", "예준", "유준", "수호", "이안", "선우", "주원",
   "건우", "태오", "민준", "우진", "지안", "로운", "한결", "다온", "산", "강", "율", "윤호", "태양", "바람",
+  "준서", "현우", "지훈", "도현", "승우", "시윤", "연우", "정우", "준혁", "은찬", "하람", "이든", "재윤", "서진",
+  "무진", "결", "가온", "누리안", "한솔", "들", "빛찬", "온", "하늘", "새결", "마루", "여름", "겨울", "나무",
 ];
 export const NAMES_F = [
   "서아", "하윤", "지아", "하은", "수아", "아린", "지유", "윤슬", "나은", "다은", "소율", "채원",
   "이서", "시아", "예린", "하린", "유나", "온유", "새봄", "가을", "보라", "나래", "별", "솔", "단비", "누리",
+  "지우", "서윤", "채아", "수빈", "다인", "예나", "가은", "하율", "연서", "은서", "소이", "라온", "다솜", "해든",
+  "봄", "은별", "이슬", "아라", "초롱", "구슬", "보미", "샛별", "노을", "여울", "꽃님", "달래", "고은", "미르",
 ];
+/** 이름이 다 쓰이면 두 글자를 새로 지어 붙인다 */
+const SYL_A = ["가", "나", "다", "라", "마", "바", "사", "아", "자", "하", "서", "도", "유", "지", "소", "은", "태", "해", "윤", "재"];
+const SYL_B = ["온", "율", "린", "준", "솔", "빈", "현", "슬", "결", "람", "윤", "들", "원", "이", "담", "울", "희", "찬", "결", "새"];
 
 export function randomName(r: RngHolder, sex: "M" | "F", taken: Set<string>) {
   const pool = (sex === "M" ? NAMES_M : NAMES_F).filter((n) => !taken.has(n));
   if (pool.length) return pick(r, pool);
-  return pick(r, sex === "M" ? NAMES_M : NAMES_F) + (taken.size + 1);
+  for (let i = 0; i < 40; i++) {
+    const n = pick(r, SYL_A) + pick(r, SYL_B);
+    if (!taken.has(n)) return n;
+  }
+  return pick(r, SYL_A) + pick(r, SYL_B) + pick(r, SYL_B);
 }
 
 function hasBatchim(word: string) {
@@ -157,6 +168,25 @@ export const THOUGHTS: Record<string, string[]> = {
   parentPraise: ["{kid}, 잘하는구나!", "제법인데?", "고마워, {kid}."],
   nightFeed: ["아이고, 또 깼구나…", "그래그래, 맘마 먹자.", "(하품) 금방 줄게…"],
   noFoodKid: ["먹일 게 없네…", "조금만 참자, 응?"],
+  // ─── 종교 ───
+  faithFound: ["우리 함께 {name}을(를) 세우자.", "같은 걸 비는 사람들이 이렇게 모였네.", "이제 우리에겐 믿음이 있어."],
+  faithJoin: ["나도 {name}에 들어갈래.", "함께 빌면 이루어질 거야."],
+  pray_rain: ["하늘이시여, 단비를 내려 주소서.", "메마른 밭에 비를…", "올해도 풍년이 들게 해 주소서."],
+  pray_bounty: ["먹을 것이 넘치게 하소서.", "짐승들이 많이 나게 해 주소서.", "사냥이 잘되게 해 주소서."],
+  pray_health: ["아픈 이가 어서 낫게 하소서.", "모두 건강하게 지켜 주소서."],
+  pray_peace: ["맹수와 재해로부터 지켜 주소서.", "마을을 평안하게 해 주소서."],
+  pray_curse: ["저들에게 재앙을…", "땅이 흔들리고 바다가 성나게 하소서…", "미운 이들에게 벌을…"],
+  rainAnswered: ["비다! 기도가 통했어!", "하늘이 들어주셨어!"],
+  // ─── 경제 ───
+  tradeOffer: ["{what}, {price}에 줄래?", "{what} 하나 바꾸자!", "그 {what} 나한테 팔아."],
+  tradeDeal: ["좋아, 거래하자!", "그 값이면 괜찮지.", "옜다, 가져가."],
+  tradeGot: ["{what}, 잘 샀다!", "이걸 꼭 갖고 싶었어.", "좋은 거래였어."],
+  tradeSold: ["{what}을(를) {price}에 팔았다.", "장터에 내다 팔았어."],
+  tradeFail: ["돈이 모자라…", "흥정이 안 되네.", "다음에 사야겠다."],
+  // ─── 나라 ───
+  nationFound: ["{name} 만세!", "우리에게도 나라가 생겼어!", "왕이시여, 오래오래!"],
+  foreignShip: ["{name}의 배다!", "저 배엔 뭘 싣고 왔을까?"],
+  warWon: ["이겼다! 우리가 지켜 냈어!", "{name}… 아니, 우리 나라 만세!"],
 };
 
 /** 일곱 살 전의 아이가 어른 혼잣말 대신 하는 말 */
@@ -169,7 +199,7 @@ export function thought(r: RngHolder, key: string, vars: Record<string, string> 
   if (!list) return "";
   let s = pick(r, list);
   for (const [k, v] of Object.entries(vars)) {
-    s = s.replace(`{${k}}이(가)`, josa(v, "이/가")).replace(`{${k}}와(과)`, josa(v, "과/와")).replaceAll(`{${k}}`, v);
+    s = s.replace(`{${k}}이(가)`, josa(v, "이/가")).replace(`{${k}}와(과)`, josa(v, "과/와")).replace(`{${k}}을(를)`, josa(v, "을/를")).replaceAll(`{${k}}`, v);
   }
   return s;
 }

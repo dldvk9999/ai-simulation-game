@@ -6,6 +6,10 @@ import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, STRUCTS, TECH_BY_ID, WOODEN } fro
 import { active, beastName, TOWER, towerRange } from "@/sim/beasts";
 import { floorsOf, hpOf, maxHp, purposeOf } from "@/sim/building";
 import { carerOf, stageName } from "@/sim/childcare";
+import { burnRate, fireScale, scaleName } from "@/sim/fire";
+import { believers, faithLabel, FAITH } from "@/sim/religion";
+import { CURRENCY, money, walletLabel } from "@/sim/economy";
+import { GOV_NAME, ministerTitle, moodName, nationOf } from "@/sim/nation";
 import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
 import { ILL_NAME } from "@/sim/disease";
 import { groupStage, groupTitle } from "@/sim/society";
@@ -55,8 +59,10 @@ interface Dyn {
   /** 맹수 [id, x, z, 방향, 상태, 체력] */
   bs?: [number, number, number, number, Beast["st"], number][];
   mo?: number;
-  /** 불길 [id, x, z, 반경, 세기, 타는 건물] */
-  bz?: [number, number, number, number, number, number | 0][];
+  /** 바다 건너 와 있는 배 */
+  vs?: WorldState["visit"];
+  /** 불길 [id, x, z, 반경, 세기, 타는 건물, 그 건물이 부서진 정도, 커질 수 있는 끝] */
+  bz?: [number, number, number, number, number, number | 0, number, number][];
 }
 
 const NEED_KEYS = ["hunger", "thirst", "energy", "warmth", "social", "fun"] as const;
@@ -77,7 +83,7 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family"]);
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family", "faith", "trade", "nation"]);
 const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅" };
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
@@ -335,7 +341,8 @@ export class GameRuntime {
       ds: w.disaster,
       bs: w.beasts.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp)]),
       mo: Math.round(w.morale),
-      bz: w.blazes.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.r), r1(b.heat), b.sid ?? 0]),
+      vs: w.visit,
+      bz: w.blazes.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.r), r1(b.heat), b.sid ?? 0, b.sid != null ? r1(findById(w.structures, b.sid)?.dmg ?? 0) : 0, r1(b.max)]),
     };
   }
 
@@ -388,7 +395,15 @@ export class GameRuntime {
       b.x = x; b.z = z; b.rot = rot; b.st = st; b.hp = hp;
     }
     if (d.mo != null) w.morale = d.mo;
-    if (d.bz) w.blazes = d.bz.map(([id, x, z, r, heat, sid]) => ({ id, x, z, r, max: r, heat, sid: sid || undefined, fuel: 0, t: 0, why: "spread", by: [] }));
+    if (d.vs !== undefined) w.visit = d.vs;
+    if (d.bz) {
+      w.blazes = d.bz.map(([id, x, z, r, heat, sid, , max]) => ({ id, x, z, r, max: max ?? r, heat, sid: sid || undefined, fuel: 0, t: 0, why: "spread", by: [] }));
+      // 타고 있는 건물의 내구도는 바로바로 맞춘다
+      for (const [, , , , , sid, dmg] of d.bz) {
+        const s = sid ? findById(w.structures, sid) : undefined;
+        if (s && dmg != null) s.dmg = dmg;
+      }
+    }
     for (const [id, x, z, rot, st, held] of d.f) {
       const f = findById(w.fish, id);
       if (!f) continue;
@@ -650,6 +665,7 @@ export class GameRuntime {
       morale: Math.round(w.morale ?? 70),
       beast: beastAlert(w),
       fire: w.blazes.length ? { count: w.blazes.length, houses: w.blazes.filter((b) => b.sid != null).length } : null,
+      ...this.society(),
       structure: hud.structId != null ? this.structDetail(hud.structId) : null,
       generation: w.stats.generation,
       people: summaries,
@@ -669,6 +685,29 @@ export class GameRuntime {
     });
   }
 
+  /** 나라 · 종교 · 경제 · 바다 건너 배 */
+  private society() {
+    const w = this.world!;
+    const g = nationOf(w);
+    const name = (id: number | null | undefined) => (id != null ? findById(w.people, id)?.name ?? "" : "");
+    const v = w.visit;
+    const vn = v ? w.nations.find((n) => n.id === v.nation) : undefined;
+    const NAME: Record<string, string> = { rain: "기우제", bounty: "풍요제", health: "치유 기도", peace: "수호제", curse: "저주" };
+    return {
+      nation: g ? {
+        name: g.name,
+        king: name(g.leader),
+        gov: GOV_NAME[g.gov?.kind ?? "monarchy"],
+        ministers: [g.gov?.chancellor && `재상 ${name(g.gov.chancellor)}`, g.gov?.general && `장군 ${name(g.gov.general)}`, g.gov?.treasurer && `재무관 ${name(g.gov.treasurer)}`].filter(Boolean).join(" · "),
+        foreign: w.nations.filter((n) => n.met).map((n) => ({ name: n.name, mood: moodName(n.mood), war: !!n.war })),
+      } : null,
+      ship: vn && (v!.kind === "trade" || w.time >= v!.arrive - 3 * 3600) ? { name: vn.name, war: v!.kind === "war" } : null,
+      blessings: [...new Set(w.blessings.filter((b) => w.time < b.until).map((b) => b.aim))].map((a) => ({ icon: FAITH[a].icon, name: NAME[a] })),
+      faiths: w.religions.map((r) => ({ name: r.name, icon: FAITH[r.aim].icon, wish: FAITH[r.aim].wish, count: believers(w, r).length, rites: r.rites })),
+      economy: w.economy ? { currency: CURRENCY[w.economy.era]!.name, treasury: money(w, w.economy.treasury), trades: w.economy.trades } : null,
+    };
+  }
+
   private structDetail(id: number): StructDetail | null {
     const w = this.world!;
     const s = findById(w.structures, id);
@@ -679,7 +718,9 @@ export class GameRuntime {
     const def = STRUCTS[s.type];
     const dmg = s.dmg ?? 0;
     const blaze = w.blazes.find((b) => b.sid === s.id);
-    const state = blaze ? `🔥 불타는 중 (불길 ${Math.round(blaze.heat * 100)}%) · 사람들이 물을 퍼 나르는 중`
+    // 현실 1분(게임 72분)에 깎이는 내구도
+    const perMin = blaze ? Math.max(1, Math.round(burnRate(w, blaze, s) * 1.2 * maxHp(s))) : 0;
+    const state = blaze ? `🔥 ${scaleName(fireScale(w, blaze))} · 내구도가 1분에 ${perMin}씩 줄어드는 중`
       : s.plan === 0 && s.prog < 1 ? "설계를 기다리는 중"
       : s.prog < 1 ? `짓는 중 ${Math.round(s.prog * 100)}%`
       : dmg >= 0.6 ? "크게 부서져 쓸 수 없음 · 고칠 사람을 기다리는 중"
@@ -760,12 +801,14 @@ export class GameRuntime {
       home: home ? STRUCTS[home.type].name + (home.lv && home.lv > 1 ? ` ${home.lv}층` : "") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
       preg: !!p.preg,
       group: p.group ?? null,
-      role: p.role ? `${ROLE_ICON[p.role]} ${ROLE_NAME[p.role]}` : kidIcon(ageYears(p.birth, w.time)) && `${kidIcon(ageYears(p.birth, w.time))} ${stageName(ageYears(p.birth, w.time))}`,
+      role: p.role ? `${ROLE_ICON[p.role]} ${p.role === "minister" ? ministerTitle(w, p) || ROLE_NAME[p.role] : ROLE_NAME[p.role]}` : kidIcon(ageYears(p.birth, w.time)) && `${kidIcon(ageYears(p.birth, w.time))} ${stageName(ageYears(p.birth, w.time))}`,
       ill: p.ill ?? 0,
       illName: p.ill ? (p.flu && p.ill === 2 ? "독감 기운" : ILL_NAME[p.ill]) : "",
       away: !!p.away,
       groupName: g ? `${groupTitle(w, g)} · ${groupStage(w, g)}` : "",
       view: view.length ? view.join(" · ") : "중도",
+      faith: faithLabel(w, p),
+      wallet: walletLabel(w, p),
     };
   }
 }

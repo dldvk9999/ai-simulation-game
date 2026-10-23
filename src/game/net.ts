@@ -179,8 +179,12 @@ function fromB64(b64: string) {
 
 /** 소수는 셋째 자리까지만: 위치·욕구 값에는 충분하고 저장·전송 크기가 절반으로 준다 */
 const COARSE = new Set(["x", "z", "tx", "tz", "rot", "s", "g"]);
-export const compact = (k: string, v: unknown) =>
-  typeof v === "number" && !Number.isInteger(v) ? (COARSE.has(k) ? Math.round(v * 100) / 100 : Math.round(v * 1000) / 1000) : v;
+/** 식물의 0인 값(그루터기·불·열매·다시 자랄 때)은 빼고 보낸다: 불러올 때 0으로 채운다 */
+const PLANT_ZERO = new Set(["stump", "regrow", "burn", "fruit"]);
+export function compact(this: unknown, k: string, v: unknown) {
+  if (v === 0 && PLANT_ZERO.has(k) && this && typeof this === "object" && "regrow" in this && "kind" in this) return undefined;
+  return typeof v === "number" && !Number.isInteger(v) ? (COARSE.has(k) ? Math.round(v * 100) / 100 : Math.round(v * 1000) / 1000) : v;
+}
 
 /** 큰 상태를 Realtime 메시지로 보내기 위해 gzip+base64 */
 export async function pack(obj: unknown): Promise<{ z?: string; j?: string }> {

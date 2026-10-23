@@ -433,7 +433,7 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     const el = label.el;
     // 무리의 색과 이끄는 사람 표시
     const g = p.group != null ? w.groups.find((x) => x.id === p.group) : undefined;
-    const tag = `${p.role === "leader" ? "👑 " : ""}${p.name}`;
+    const tag = `${p.role === "king" ? "👑 " : p.role === "leader" ? "🎖️ " : ""}${p.name}`;
     if (label.name.textContent !== tag) label.name.textContent = tag;
     const gc = g ? `hsl(${Math.round(g.hue * 360)} 62% 55%)` : "";
     if (label.name.dataset.gc !== gc) {

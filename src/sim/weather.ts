@@ -5,6 +5,7 @@ import type { Terrain } from "./terrain";
 import type { WeatherType, WorldState } from "./types";
 import { burnable, igniteStructure, startWildfire } from "./fire";
 import { heightOf } from "./building";
+import { blessed, rainAnswered } from "./religion";
 import { addFx, bump, chron, knows, nearest } from "./world";
 
 // 계절별 날씨 가중치. 어느 계절이든 맑음이 가장 자주 나온다.
@@ -44,13 +45,19 @@ export const WEATHER_ICON: Record<WeatherType, string> = {
 export function updateWeather(w: WorldState, T: Terrain, dt: number) {
   const W = w.weather;
   if (w.time >= W.until) {
-    let next = weighted(w, WEIGHTS[seasonOf(w.time)]);
+    // 기우제가 통하면 비가 올 확률이 조금 오른다
+    const wish = blessed(w, "rain");
+    const base = WEIGHTS[seasonOf(w.time)];
+    const weights = wish ? { ...base, rain: base.rain * (1 + 1.2 * wish) } : base;
+    let next = weighted(w, weights);
     // 같은 궂은 날씨가 연달아 길게 이어지지 않게 한 번 더 굴린다
-    if (next === W.type && next !== "clear") next = weighted(w, WEIGHTS[seasonOf(w.time)]);
+    if (next === W.type && next !== "clear") next = weighted(w, weights);
+    if (wish && next === "rain") rainAnswered(w);
     // 포근한 날에는 눈 대신 구름
     if (next === "snow" && baseTemp(w.time) > 9) next = "cloudy";
     W.prev = W.type;
     W.type = next;
+    if (next === "rain" || next === "storm") w.history.lastRain = w.time;
     W.changedAt = w.time;
     const [a, b] = DURATION[next];
     W.until = w.time + range(w, a, b) * HOUR;
