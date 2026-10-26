@@ -225,6 +225,24 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
         tool = "bucket";
         break;
       }
+      case "limp": {
+        // 다친 다리를 끌며 절뚝인다
+        const k = s(t * 5);
+        lL = Math.max(0, k) * 0.55; lR = -Math.max(0, -k) * 0.2;
+        aL = -k * 0.3; aR = 0.5; aRx = 0.3;
+        by = Math.abs(k) * 0.05 - 0.03; tx = k * 0.1; tz = -0.12;
+        break;
+      }
+      case "dice": {
+        // 쪼그려 앉아 주사위를 흔들어 던진다
+        const k = (t * 1.2) % 1;
+        by = -0.42; lL = lR = 1.4; tz = -0.35;
+        aL = 0.9; aLx = 0.25;
+        aR = k < 0.7 ? 1.3 + s(t * 22) * 0.18 : 1.9 - (k - 0.7) * 3;
+        aRx = -0.1;
+        hz = -0.25 + (k > 0.7 ? 0.1 : 0);
+        break;
+      }
       case "walk": case "carry": {
         const k = s(t * 9);
         lL = k * 0.55; lR = -k * 0.55;

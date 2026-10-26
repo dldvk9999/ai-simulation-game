@@ -53,7 +53,7 @@ export function newProject(w: WorldState, type: StructureType, site: { x: number
 const PURPOSE_VERB: Record<Purpose, string> = {
   home: "여럿이 잠잘", defense: "맹수를 막아 낼", craft: "도구를 만들", food: "먹을 것을 마련할", store: "물건을 쌓아 둘",
   civic: "함께 모일", sea: "바다로 나갈", mine: "광석을 캘", care: "아픈 사람을 돌볼",
-  faith: "믿음을 모을", trade: "물건을 사고팔", rule: "나라를 다스릴", misc: "",
+  faith: "믿음을 모을", trade: "물건을 사고팔", rule: "나라를 다스릴", play: "내기를 즐길", misc: "",
 };
 
 export function purposeOf(type: StructureType) {

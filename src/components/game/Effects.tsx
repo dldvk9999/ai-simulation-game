@@ -2,12 +2,13 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
+import { growthOf } from "@/sim/beasts";
 import type { Terrain } from "@/sim/terrain";
 import type { FxType } from "@/sim/types";
 import { useAmbience, useRuntime } from "./context";
 import { env } from "./env";
 
-const N = 900;
+const N = 1800;
 
 const vert = /* glsl */ `
 attribute float aSize; attribute float aAlpha; attribute vec3 aColor;
@@ -32,7 +33,9 @@ interface P {
 }
 
 type Spec = { n: number; colors: string[]; speed: number; up: number; life: number; size: number; g: number; spread?: number; grow?: number };
-const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple" | "blaze" | "ember", Spec>> = {
+const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple" | "blaze" | "ember" | "flame", Spec>> = {
+  dice: { n: 3, colors: ["#ffffff", "#ff6b6b", "#ffe066"], speed: 0.7, up: 2.2, life: 0.6, size: 0.15, g: 8 },
+  flame: { n: 1, colors: ["#ffb347", "#ff7b29", "#ffe08a", "#ff4d2e", "#fff3b0"], speed: 0, up: 0, life: 0.8, size: 1.1, g: -0.6, grow: 1.4 },
   douse: { n: 26, colors: ["#d9f3ff", "#a8e0ff", "#ffffff", "#e9eef2"], speed: 2.2, up: 2.6, life: 1.1, size: 0.26, g: 6, spread: 0.6 },
   coin: { n: 8, colors: ["#ffd43b", "#f5c542", "#fff3b0"], speed: 1.2, up: 2.4, life: 0.9, size: 0.16, g: 6 },
   pray: { n: 14, colors: ["#fff3b0", "#d0bfff", "#ffffff"], speed: 0.5, up: 1.6, life: 2.2, size: 0.2, g: -0.5, spread: 0.6 },
@@ -100,6 +103,25 @@ export function Effects({ terrain }: { terrain: Terrain }) {
     }
   };
 
+  /** 용의 불길: 입에서 목표까지 불꽃이 쏟아진다 */
+  const stream = (fx: number, fy: number, fz: number, tx: number, ty: number, tz: number) => {
+    const s = SPECS.flame!;
+    const dx = tx - fx, dy = ty - fy, dz = tz - fz;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const spd = len / 0.7;
+    for (let i = 0; i < 110 && parts.current.length < N; i++) {
+      const j = () => (Math.random() - 0.5) * 0.35;
+      const lag = Math.random() * 0.25;
+      col.set(s.colors[Math.floor(Math.random() * s.colors.length)]);
+      parts.current.push({
+        x: fx + (dx / len) * lag, y: fy + (dy / len) * lag, z: fz + (dz / len) * lag,
+        vx: (dx / len + j()) * spd, vy: (dy / len + j()) * spd, vz: (dz / len + j()) * spd,
+        life: 0.55 + Math.random() * 0.4, max: 0.9, size: s.size * (0.6 + Math.random() * 0.9),
+        g: s.g, r: col.r, gC: col.g, b: col.b, grow: s.grow ?? 0,
+      });
+    }
+  };
+
   useFrame((_, dtRaw) => {
     const w = rt.world;
     if (!w) return;
@@ -155,6 +177,20 @@ export function Effects({ terrain }: { terrain: Terrain }) {
       if (f.type === "douse") {
         y = ground + 0.8;
         amb?.pop(700, 0.05);
+      }
+      if (f.type === "dice") y = ground + 1.1;
+      if (f.type === "breath") {
+        // 용의 머리에서 목표로
+        const b = w.beasts.find((q) => q.id === f.ref);
+        if (b) {
+          const sc = 1.25 * (0.85 + 0.45 * growthOf(b));
+          const hx = b.x + Math.cos(b.rot) * 4.0 * sc, hz = b.z + Math.sin(b.rot) * 4.0 * sc;
+          const hy = Math.max(terrain.height(b.x, b.z), 0) + (b.fly ?? 1) * 6.5 + 2.45 * sc;
+          stream(hx, hy, hz, f.x, ground + 0.4, f.z);
+        }
+        amb?.pop(60, 0.22);
+        spawn("ignite", f.x, ground + 0.4, f.z);
+        continue;
       }
       if (f.type === "cry") {
         const p = w.people.find((q) => q.id === f.ref);

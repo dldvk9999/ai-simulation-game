@@ -13,6 +13,7 @@ import { josa } from "./text";
 import type { Act, Group, Nation, Person, Res, WorldState } from "./types";
 import { addFx, addStock, bump, chron, dist, findById, knows, living, newId, stockOf } from "./world";
 import { pickWeapon, weaponOf } from "./beasts";
+import { addFund, tradeMul } from "./civic";
 
 const NATION_NAMES = ["가람국", "해솔국", "온누리국", "새벽국", "윤슬국", "한울국", "푸른섬국", "바람결국"];
 const FOREIGN_NAMES = ["해랑국", "별무리국", "청솔국", "마루국", "아라국", "다래국", "구름섬국", "노을국"];
@@ -211,7 +212,7 @@ function foreign(w: WorldState, T: Terrain, g: Group) {
       continue;
     }
     // 무역: 사이가 나쁘지 않으면 상선이 드나든다
-    if (!n.war && dock && n.mood > -0.2 && w.time - n.lastTrade > range(w, 12, 24) * DAY) {
+    if (!n.war && dock && n.mood > -0.2 && w.time - n.lastTrade > (range(w, 12, 24) * DAY) / tradeMul(w)) {
       n.lastTrade = w.time;
       w.visit = { nation: n.id, kind: "trade", arrive: w.time, until: w.time + range(w, 8, 14) * HOUR };
       tradeWith(w, g, n);
@@ -231,10 +232,12 @@ function tradeWith(w: WorldState, g: Group, n: Nation) {
     if (extra >= 6 && (!gave || extra > gave[1])) gave = [r, Math.min(20, extra)];
   }
   const want: Res = foodTotal(w) < pop * 6 ? "meal" : pick(w, TRADE_GOODS);
-  const got = gave ? Math.max(2, Math.round(gave[1] / 2.5)) : int(w, 1, 3);
+  const got = Math.round((gave ? Math.max(2, Math.round(gave[1] / 2.5)) : int(w, 1, 3)) * tradeMul(w));
   if (gave) addStock(w, gave[0], -gave[1]);
   addStock(w, want, got);
   if (w.economy) w.economy.treasury += got * 3;
+  // 무역에서 남긴 돈도 나라 살림에
+  addFund(w, got * 2);
   n.trades = (n.trades ?? 0) + 1;
   // 흥정이 틀어지면 사이가 나빠지기도 한다
   const dispute = chance(w, 0.15);

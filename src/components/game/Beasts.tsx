@@ -1,5 +1,6 @@
 "use client";
-// 맹수: 늑대 · 곰 · 호랑이 · 검치호. 강한 놈일수록 크게, 싸우는 동안에는 머리 위에 체력이 보인다.
+// 맹수: 늑대 · 곰 · 호랑이 · 검치호 · 용. 강한 놈일수록 크게, 싸우는 동안에는 머리 위에 체력이 보인다.
+// 용은 날개를 퍼덕이며 하늘 높이 맴돌다가 사람을 덮칠 때만 땅으로 내려온다.
 import { useFrame, useThree } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
@@ -65,11 +66,69 @@ const GEO: Record<BeastKind, THREE.BufferGeometry> = {
     part(G.box, { color: "#b38a55", pos: [-0.88, 0.95, 0], scale: [0.3, 0.12, 0.12], rot: [0, 0, 0.5] }),
     ...legs("#a8804f", 0.55, 0.2, 0.6, 0.18),
   ]),
+  dragon: merge([
+    // 몸통 · 가슴 · 배
+    part(G.box, { color: "#a82c25", pos: [0, 1.5, 0], scale: [2.6, 1.0, 1.2] }),
+    part(G.box, { color: "#b8352d", pos: [0.95, 1.6, 0], scale: [1.0, 1.15, 1.3] }),
+    part(G.box, { color: "#e3a548", pos: [0.2, 1.02, 0], scale: [2.3, 0.22, 0.95] }),
+    // 등과 목의 가시
+    ...[-1.0, -0.4, 0.2, 0.8].map((x) => part(G.cone(0.15, 0.5, 4), { color: "#f0d080", pos: [x, 2.18, 0] })),
+    part(G.cone(0.12, 0.4, 4), { color: "#f0d080", pos: [1.75, 2.4, 0], rot: [0, 0, -0.5] }),
+    part(G.cone(0.1, 0.34, 4), { color: "#f0d080", pos: [2.4, 2.85, 0], rot: [0, 0, -0.4] }),
+    // 목: 앞으로 비스듬히 들린다
+    part(G.box, { color: "#a82c25", pos: [1.8, 2.0, 0], scale: [1.1, 0.55, 0.6], rot: [0, 0, 0.55] }),
+    part(G.box, { color: "#a82c25", pos: [2.5, 2.48, 0], scale: [0.95, 0.48, 0.52], rot: [0, 0, 0.35] }),
+    // 머리 · 주둥이 · 벌린 아래턱 · 뿔
+    part(G.box, { color: "#b8352d", pos: [3.15, 2.7, 0], scale: [0.95, 0.55, 0.66] }),
+    part(G.box, { color: "#c4473b", pos: [3.8, 2.6, 0], scale: [0.6, 0.32, 0.48] }),
+    part(G.box, { color: "#e3a548", pos: [3.6, 2.32, 0], scale: [0.75, 0.12, 0.42], rot: [0, 0, -0.18] }),
+    part(G.cone(0.08, 0.6, 4), { color: "#f4ead2", pos: [2.75, 3.12, 0.22], rot: [0.25, 0, 1.15] }),
+    part(G.cone(0.08, 0.6, 4), { color: "#f4ead2", pos: [2.75, 3.12, -0.22], rot: [-0.25, 0, 1.15] }),
+    // 꼬리 (끝으로 갈수록 가늘고, 끝에는 창날 같은 비늘)
+    part(G.box, { color: "#a82c25", pos: [-1.7, 1.35, 0], scale: [1.1, 0.6, 0.7], rot: [0, 0, 0.1] }),
+    part(G.box, { color: "#9c2822", pos: [-2.7, 1.15, 0], scale: [1.0, 0.42, 0.46], rot: [0, 0, 0.18] }),
+    part(G.box, { color: "#93241f", pos: [-3.6, 0.92, 0], scale: [0.9, 0.28, 0.3], rot: [0, 0, 0.26] }),
+    part(G.box, { color: "#8a201b", pos: [-4.35, 0.7, 0], scale: [0.7, 0.18, 0.2], rot: [0, 0, 0.3] }),
+    part(G.cone(0.3, 0.6, 4), { color: "#f0d080", pos: [-4.85, 0.55, 0], rot: [0, 0, Math.PI / 2 + 0.3], scale: [1, 1, 0.35] }),
+    // 다리와 발톱
+    ...legs("#8f241e", 0.85, 0.45, 1.05, 0.3),
+    ...[[0.85, 0.45], [0.85, -0.45], [-0.85, 0.45], [-0.85, -0.45]].map(([x, z]) => part(G.cone(0.06, 0.22, 4), { color: "#f4ead2", pos: [x + 0.2, 0.06, z], rot: [0, 0, -Math.PI / 2] })),
+  ]),
 };
 
-const BASE: Record<BeastKind, number> = { wolf: 1, bear: 1, tiger: 1, sabertooth: 1.1 };
+/** 용의 날개: 어깨에서 손목 · 날개 끝 · 뒷막으로 펼쳐진 막 (z가 바깥쪽) */
+function wingGeo(side: 1 | -1) {
+  const s = side;
+  const S = [0, 0, 0], wrist = [0.3, 0.9, 2.6 * s], tip = [-0.4, 0.5, 5.4 * s];
+  const back = [[-1.7, 0.15, 4.2 * s], [-2.3, 0.05, 2.6 * s], [-1.6, 0, 0.7 * s]];
+  const tri = [S, wrist, tip, S, tip, back[0], S, back[0], back[1], S, back[1], back[2]];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(tri.flat(), 3));
+  g.computeVertexNormals();
+  return g;
+}
+const WING_L = wingGeo(1);
+const WING_R = wingGeo(-1);
+const wingMat = new THREE.MeshStandardMaterial({ color: "#8c2a24", side: THREE.DoubleSide, roughness: 0.85, flatShading: true });
+const boneGeo = new THREE.CylinderGeometry(0.06, 0.09, 1, 5);
+const boneMat = new THREE.MeshStandardMaterial({ color: "#5e1a17", roughness: 0.8 });
+/** 날개 뼈: 어깨 → 손목 → 날개 끝 */
+function bones(side: 1 | -1) {
+  const seg = (a: number[], b: number[]) => {
+    const d = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
+    return { pos: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number], q, len: d.length() };
+  };
+  return [seg([0, 0, 0], [0.3, 0.9, 2.6 * side]), seg([0.3, 0.9, 2.6 * side], [-0.4, 0.5, 5.4 * side])];
+}
+const BONES_L = bones(1);
+const BONES_R = bones(-1);
+/** 하늘에 떠 있을 때의 높이 */
+const SKY = 6.5;
+
+const BASE: Record<BeastKind, number> = { wolf: 1, bear: 1, tiger: 1, sabertooth: 1.1, dragon: 1.25 };
 /** 머리 위치 (눈 · 체력 막대) */
-const HEAD: Record<BeastKind, [number, number]> = { wolf: [0.86, 0.9], bear: [1.2, 1.15], tiger: [1.14, 0.95], sabertooth: [1.22, 1.06] };
+const HEAD: Record<BeastKind, [number, number]> = { wolf: [0.86, 0.9], bear: [1.2, 1.15], tiger: [1.14, 0.95], sabertooth: [1.22, 1.06], dragon: [3.3, 2.82] };
 
 const eyeGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
 const eyeMat = new THREE.MeshBasicMaterial({ color: "#ffd84d" });
@@ -79,7 +138,7 @@ const barFg = new THREE.MeshBasicMaterial({ color: "#e5484d", depthWrite: false 
 const starGeo = new THREE.TetrahedronGeometry(0.09);
 const starMat = new THREE.MeshBasicMaterial({ color: "#ffe14d" });
 
-type Disp = { x: number; z: number; r: number };
+type Disp = { x: number; z: number; r: number; y?: number };
 
 export function Beasts({ terrain }: { terrain: Terrain }) {
   const rt = useRuntime();
@@ -107,7 +166,23 @@ export function Beasts({ terrain }: { terrain: Terrain }) {
       const body = g.children[0] as THREE.Group;
       const stars = g.children[1] as THREE.Group;
       const bar = g.children[2] as THREE.Group;
-      g.position.set(d.x, ground, d.z);
+      // 용은 하늘을 난다: 높이를 부드럽게 따라가고 날개를 퍼덕인다
+      const dragon = b.kind === "dragon";
+      if (dragon) {
+        const fly = b.st === "dead" ? 0 : b.fly ?? 1;
+        d.y = (d.y ?? fly) + (fly - (d.y ?? fly)) * (1 - Math.exp(-dt * 2));
+        // 날 때는 크게 퍼덕이고, 땅에서는 반쯤 접어 든다 (늘 조금 치켜 올려 옆에서도 보이게)
+        const flying = d.y > 0.4;
+        const flap = Math.sin(t * (flying ? 4.5 : 1.8) + b.id) * (flying ? 0.6 : 0.15) + (flying ? 0.35 : 0.9);
+        const wl = body.children[2] as THREE.Object3D, wr = body.children[3] as THREE.Object3D;
+        wl.rotation.x = -flap;
+        wr.rotation.x = flap;
+        if (b.st === "dead") {
+          wl.rotation.x = 0.2;
+          wr.rotation.x = -0.2;
+        }
+      }
+      g.position.set(d.x, ground + (dragon ? (d.y ?? 0) * SKY + (d.y ?? 0) * Math.sin(t * 1.3 + b.id) * 0.4 : 0), d.z);
       g.rotation.set(0, -d.r, 0);
       body.scale.setScalar(sc);
       const moving = b.st === "prowl" || b.st === "chase" || b.st === "leave";
@@ -166,9 +241,21 @@ export function Beasts({ terrain }: { terrain: Terrain }) {
           <group>
             <mesh geometry={GEO[kind]} material={vcMat} castShadow />
             <group position={[HEAD[kind][0], HEAD[kind][1], 0]}>
-              <mesh geometry={eyeGeo} material={eyeMat} position-z={0.09} />
-              <mesh geometry={eyeGeo} material={eyeMat} position-z={-0.09} />
+              <mesh geometry={eyeGeo} material={eyeMat} position-z={kind === "dragon" ? 0.16 : 0.09} />
+              <mesh geometry={eyeGeo} material={eyeMat} position-z={kind === "dragon" ? -0.16 : -0.09} />
             </group>
+            {kind === "dragon" && (
+              <>
+                <group position={[0.6, 2.0, 0.5]}>
+                  <mesh geometry={WING_L} material={wingMat} castShadow />
+                  {BONES_L.map((s, i) => <mesh key={i} geometry={boneGeo} material={boneMat} position={s.pos} quaternion={s.q} scale={[1, s.len, 1]} />)}
+                </group>
+                <group position={[0.6, 2.0, -0.5]}>
+                  <mesh geometry={WING_R} material={wingMat} castShadow />
+                  {BONES_R.map((s, i) => <mesh key={i} geometry={boneGeo} material={boneMat} position={s.pos} quaternion={s.q} scale={[1, s.len, 1]} />)}
+                </group>
+              </>
+            )}
           </group>
           <group visible={false}>
             {[0, 1, 2].map((i) => (

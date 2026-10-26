@@ -6,6 +6,7 @@ import {
   active, BEAST_INFO, pickWeapon, safeFromBeast, shelterOk, strike, STRIKE_EVERY, teamPower, threatFor, TOWER, towerRange, weaponOf,
 } from "./beasts";
 import { finishDesign } from "./building";
+import { unstick, walk } from "./collide";
 import {
   assistFinish, assistWork, babyDecide, babyTick, careArrive, careCands, careFinish, careWork, CHILD_AGE, fussFinish, kidCands, THINK_AGE,
 } from "./childcare";
@@ -18,6 +19,8 @@ import { douseArrive, douseFinish, dousePlan, dousersOf, fireEdge, fireToFight, 
 import { blessed, riteCand, riteFinish, riteStart } from "./religion";
 import { payWage, tradeArrive, tradeCand, tradeFinish } from "./economy";
 import { atWar, musterCand } from "./nation";
+import { addictFinish, addictPlan, addictWork, counselCand, counselFinish, gambleCand, gambleWork } from "./casino";
+import { roadMul } from "./civic";
 import { clamp } from "./noise";
 import {
   age, Ctx, dominant, feel, homeOf, isAdult, lying, mood, nearFire, say,
@@ -46,7 +49,7 @@ const ROLE_SKILL: Partial<Record<string, Role>> = {
 };
 const ILL_WORK = [1, 0.9, 0.75, 0.55, 0.4, 0.3];
 const skill = (p: Person, k: string) =>
-  (1 + (p.skills[k] ?? 0) * 0.6) * (p.role && ROLE_SKILL[k] === p.role ? 1.25 : 1) * ILL_WORK[illOf(p)];
+  (1 + (p.skills[k] ?? 0) * 0.6) * (p.role && ROLE_SKILL[k] === p.role ? 1.25 : 1) * ILL_WORK[illOf(p)] * (p.wound ? (p.wound.sev === 2 ? 0.55 : 0.85) : 1);
 
 /** 역할마다 더 먼저 하게 되는 일 */
 const ROLE_TAGS: Record<Role, string[]> = {
@@ -68,7 +71,7 @@ const roleBoost = (p: Person, tag: string) =>
   p.role && ROLE_TAGS[p.role].some((t) => tag === t || tag.startsWith(t + ":")) ? 0.22 : 0;
 
 /** 많이 아플 때 할 수 있는 일 */
-const SICK_OK = new Set(["eat", "drink", "sleep", "rest", "isolate", "medicate", "deposit", "shelter", "warm", "evacuate", "hide", "carried", "fuss", "flee"]);
+const SICK_OK = new Set(["eat", "drink", "sleep", "rest", "isolate", "medicate", "deposit", "shelter", "warm", "evacuate", "hide", "carried", "fuss", "flee", "addict"]);
 
 /** 이 사람의 터에 있는 모닥불 (갈라져 나간 무리는 자기 불) */
 function fireFor(w: WorldState, ctx: Ctx, p: Person) {
@@ -91,7 +94,7 @@ function wearTool(w: WorldState, p: Person, tool: Res) {
 }
 
 const SOFT: ActKind[] = ["idle", "wander", "leisure", "think", "explore", "play", "follow", "chat", "warm", "mourn"];
-const NEED_ACTS: ActKind[] = ["eat", "drink", "sleep", "warm", "shelter", "forage", "collect", "unconscious", "makefire", "hide", "defend", "carried", "douse", "flee"];
+const NEED_ACTS: ActKind[] = ["eat", "drink", "sleep", "warm", "shelter", "forage", "collect", "unconscious", "makefire", "hide", "defend", "carried", "douse", "flee", "addict"];
 
 function abort(p: Person) {
   p.act = null;
@@ -130,7 +133,12 @@ export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
     }
   }
 
+  // 게임중독에 빠지면 하던 일을 놓고 집으로 간다
+  if (p.gamble?.addict && p.gamble.addict > w.time && p.act && p.act.k !== "addict" && p.act.k !== "unconscious" && p.act.k !== "flee" && p.act.k !== "evacuate") abort(p);
   if (age(w, p) < 3) babyTick(w, ctx, p);
+  // 실시간으로 걸을 때만 부딪힘을 따진다 (오래 비운 섬을 따라잡을 때는 빠르게)
+  const fine = dt <= 40;
+  if (fine && (!p.act || p.act.ph === 1)) unstick(w, p);
 
   let budget = dt;
   for (let guard = 0; budget > 1e-6 && guard < 14 && p.alive; guard++) {
@@ -158,6 +166,19 @@ export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
         arrive(w, ctx, p, a);
         continue;
       }
+      const moving = a.k === "douse" && a.ph === 2 ? "bucket" : a.sub === "crawl" ? "crawl" : p.wound?.sev === 2 ? "limp" : a.run ? "run" : p.carry ? "carry" : "walk";
+      if (fine) {
+        // 나무·바위·건물·사람을 피해 돌아간다
+        const r = walk(w, p, a, sp, budget);
+        budget -= r.used;
+        if (r.arrived) {
+          arrive(w, ctx, p, a);
+          continue;
+        }
+        p.anim = r.moved ? moving : "idle";
+        budget = 0;
+        continue;
+      }
       p.rot = Math.atan2(a.tz - p.z, a.tx - p.x);
       const need = d / sp;
       if (need <= budget) {
@@ -170,7 +191,7 @@ export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
         p.x += (a.tx - p.x) * f;
         p.z += (a.tz - p.z) * f;
         budget = 0;
-        p.anim = a.k === "douse" && a.ph === 2 ? "bucket" : a.sub === "crawl" ? "crawl" : a.run ? "run" : p.carry ? "carry" : "walk";
+        p.anim = moving;
       }
     } else {
       const wdt = Math.min(budget, a.t);
@@ -185,7 +206,8 @@ export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
 }
 
 function speedOf(w: WorldState, p: Person, a: Act) {
-  let s = WALK_SPEED;
+  // 나라가 길을 닦고 탈것을 들이면 빨리 다닌다
+  let s = WALK_SPEED * roadMul(w);
   if (a.run) s *= 1.7;
   const yrs = age(w, p);
   if (yrs < 3) s *= 0.3;
@@ -194,6 +216,8 @@ function speedOf(w: WorldState, p: Person, a: Act) {
   const lv = illOf(p);
   if (lv) s *= [1, 0.95, 0.85, 0.7, 0.6, 0.5][lv];
   if (p.needs.energy < 20) s *= 0.8;
+  // 다친 다리로는 절뚝인다
+  if (p.wound) s *= p.wound.sev === 2 ? 0.6 : 0.85;
   if (p.emo.sadness > 0.5) s *= 0.85;
   if (p.emo.joy > 0.6) s *= 1.08;
   return s;
@@ -220,13 +244,13 @@ function track(w: WorldState, p: Person, a: Act) {
       return false;
     }
   }
-  if (a.ph === 0 && (a.k === "follow" || a.k === "chat" || a.k === "nurse" || a.k === "fight" || (a.k === "trade" && a.sub === "buy")) && a.tid != null) {
+  if (a.ph === 0 && (a.k === "follow" || a.k === "chat" || a.k === "nurse" || a.k === "fight" || a.k === "counsel" || (a.k === "trade" && a.sub === "buy")) && a.tid != null) {
     const q = findById(w.people, a.tid);
     if (!q || !onIsland(q)) {
       abort(p);
       return false;
     }
-    if (a.k === "follow" || a.k === "nurse" || a.k === "fight" || a.k === "trade") {
+    if (a.k === "follow" || a.k === "nurse" || a.k === "fight" || a.k === "trade" || a.k === "counsel") {
       const s = spot(p, q.x, q.z, a.k === "fight" ? 0.9 : 1.2);
       a.tx = s.x;
       a.tz = s.z;
@@ -341,6 +365,9 @@ function animFor(a: Act): Anim {
     case "design": return "think";
     case "rite": return "pray";
     case "trade": return "talk";
+    case "gamble": return "dice";
+    case "addict": return "dice";
+    case "counsel": return "talk";
     case "muster": return weaponOf(a.sub).range > 3 ? "aim" : "slash";
     case "carried": return "held";
     case "douse": return a.sub === "scoop" ? "scoop" : a.sub === "throw" ? "douse" : "bucket";
@@ -389,7 +416,7 @@ function start(w: WorldState, ctx: Ctx, p: Person, a: Act | null) {
       else if (a.sub === "sing") say(w, p, "happy", {}, "🎵");
       break;
     case "play": say(w, p, "play", {}, "🤸"); break;
-    case "rest": say(w, p, "fever", {}, "🤒"); break;
+    case "rest": if (p.wound && illOf(p) < 2) say(w, p, "hurt", {}, "🩹"); else say(w, p, "fever", {}, "🤒"); break;
     case "isolate": say(w, p, "isolate", {}, "🏕️", true); break;
     case "nurse": say(w, p, "nurse", {}, "🩹"); break;
     case "dig": say(w, p, "dig", {}, "⛏️"); break;
@@ -522,6 +549,19 @@ function arrive(w: WorldState, ctx: Ctx | null, p: Person, a: Act) {
       if (!tradeArrive(w, p, a)) return abort(p);
       break;
     }
+    case "gamble": {
+      const s = findById(w.structures, a.tid);
+      if (!s || !w.casino?.open) return abort(p);
+      p.rot = Math.atan2(s.z - p.z, s.x - p.x);
+      say(w, p, "gambleGo", {}, "🎲");
+      break;
+    }
+    case "counsel": {
+      const q = findById(w.people, a.tid);
+      if (!q || !onIsland(q)) return abort(p);
+      p.rot = Math.atan2(q.z - p.z, q.x - p.x);
+      break;
+    }
     case "fuss": case "assist": case "follow": {
       const q = findById(w.people, a.tid);
       if (q) p.rot = Math.atan2(q.z - p.z, q.x - p.x);
@@ -547,6 +587,12 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
   const h = dt / HOUR;
   const n = p.needs;
   switch (a.k) {
+    case "gamble":
+      gambleWork(w, p, a, dt);
+      break;
+    case "addict":
+      addictWork(w, p, a, dt);
+      break;
     case "sleep": {
       const home = homeOf(w, p);
       const inside = !!home && dist(p.x, p.z, home.x, home.z) < STRUCTS[home.type].radius + 1.5;
@@ -594,7 +640,7 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
       break;
     case "rest": case "isolate":
       n.energy = Math.min(100, n.energy + h * 9);
-      if ((a.k === "rest" && illOf(p) < 2 && n.energy > 70) || (a.k === "isolate" && illOf(p) < 5)) a.t = Math.min(a.t, 5 * MIN);
+      if ((a.k === "rest" && illOf(p) < 2 && p.wound?.sev !== 2 && n.energy > 70) || (a.k === "isolate" && illOf(p) < 5)) a.t = Math.min(a.t, 5 * MIN);
       break;
     case "council":
       n.social = Math.min(100, n.social + h * 30);
@@ -707,6 +753,8 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
     case "care": careFinish(w, ctx, p, a); break;
     case "rite": riteFinish(w, p, a); break;
     case "trade": tradeFinish(w, p, a); break;
+    case "addict": addictFinish(w, p); break;
+    case "counsel": counselFinish(w, p, a); break;
     case "fuss": fussFinish(w, p, a); break;
     case "assist": assistFinish(w, p, a); break;
     case "unconscious": {
@@ -922,7 +970,22 @@ function finish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
 
 function finishNurse(w: WorldState, p: Person, a: Act) {
   const q = findById(w.people, a.tid);
-  if (!q || !onIsland(q) || !illOf(q)) return abort(p);
+  if (!q || !onIsland(q) || (!illOf(q) && !q.wound)) return abort(p);
+  // 상처를 싸매 준다 (약초즙이 있으면 더 빨리 아문다)
+  if (q.wound) {
+    const herbal = stockOf(w, "herbal") >= 1;
+    if (herbal) addStock(w, "herbal", -1);
+    q.wound.until -= (herbal ? 1.1 : 0.6) * DAY * (p.role === "healer" ? 1.4 : 1);
+    q.health = Math.min(100, q.health + 6);
+    if (!illOf(q)) {
+      q.seen.nursed = w.time;
+      q.rel[p.id] = clamp((q.rel[p.id] ?? 0) + 0.06, -1, 1);
+      say(w, q, "thanks", { name: p.name }, "🥹");
+      practice(p, "heal");
+      feel(w, p, "joy", 0.08, false);
+      return abort(p);
+    }
+  }
   const lv = illOf(q);
   const med = medForP(w, q);
   q.seen.nursed = w.time;
@@ -1844,6 +1907,12 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const f = fleePlan(w, T, p);
     if (f) return f;
   }
+  // 게임중독: 사흘 동안 집에서 나오지 못한다
+  if (p.gamble?.addict && p.gamble.addict > w.time) {
+    const camp0 = campOf(w, p);
+    const ad = addictPlan(w, p, spot(p, camp0.x, camp0.z, 2));
+    if (ad) return ad;
+  }
   const bst = yrs >= 3 ? threatFor(w, p) : null;
   // 걷지 못하는 아기는 안겨 다니고, 배고프거나 엄마가 멀어지면 운다
   if (yrs < 3) return babyDecide(w, ctx, p);
@@ -1886,6 +1955,13 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const tc = tradeCand(w, p);
     if (tc) add("trade", tc.s, tc.mk);
   }
+  // 백성은 도박장에서 한 판, 왕과 대신은 중독될 만한 사람을 타이른다
+  if (lv < 2 && !bst) {
+    const gc = gambleCand(w, p, ctx.night);
+    if (gc) add("gamble", gc.s, gc.mk);
+    const cc = counselCand(w, p);
+    if (cc) add("counsel", cc.s, cc.mk);
+  }
 
   // 맹수가 나타났을 때: 싸울 수 있는 사람은 무기를 들고, 나머지는 집으로 숨는다
   if (bst) {
@@ -1909,6 +1985,8 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   if (lv >= 5 && !isolated(w, p)) add("isolate", 1.3, () => restPlan(w, ctx, p, true));
   else if (lv >= 3) add("rest", lv >= 4 ? 1.1 : 0.85, () => restPlan(w, ctx, p, lv >= 5));
   else if (lv === 2 && n.energy < 55) add("rest", 0.5, () => restPlan(w, ctx, p, false));
+  // 크게 다쳤으면 누워서 상처를 돌본다
+  if (p.wound?.sev === 2 && lv < 3) add("rest", 0.62 + (p.health < 50 ? 0.25 : 0), () => restPlan(w, ctx, p, false));
   if (lv >= 2 && lv <= 3 && w.time - (p.seen.medAt ?? -1e9) > 4 * HOUR) {
     const med = medForP(w, p);
     if (med) add("medicate", 0.8 + lv * 0.05, () => {
@@ -2091,12 +2169,13 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const nursing = (ctx.memo.nursing ??= new Set(w.people.filter((q) => q.act?.k === "nurse").map((q) => q.act!.tid))) as Set<number | undefined>;
     let best: Person | null = null, bs = 0;
     for (const q of w.people) {
-      if (q === p || !onIsland(q) || illOf(q) < 2 || nursing.has(q.id)) continue;
+      const hurt = q.wound?.sev === 2;
+      if (q === p || !onIsland(q) || (illOf(q) < 2 && !hurt) || nursing.has(q.id)) continue;
       if (w.time - (q.seen.nursed ?? -1e9) < 5 * HOUR) continue;
       const family = q.partner === p.id || q.parents.includes(p.id) || p.parents.includes(q.id);
       const med = medForP(w, q);
       if (illOf(q) >= 5 && isolated(w, q) && !family && p.role !== "healer" && !med) continue;
-      const sc = 0.3 + A * 0.25 + (family ? 0.25 : 0) + illOf(q) * 0.06 + (med ? 0.15 : 0) - dist(p.x, p.z, q.x, q.z) * 0.004;
+      const sc = 0.3 + A * 0.25 + (family ? 0.25 : 0) + illOf(q) * 0.06 + (hurt ? 0.18 : 0) + (med ? 0.15 : 0) - dist(p.x, p.z, q.x, q.z) * 0.004;
       if (sc > bs) {
         bs = sc;
         best = q;
@@ -2226,6 +2305,7 @@ export const ACT_LABEL: Record<ActKind, string> = {
   douse: "물을 퍼 날라 불을 끄는 중", flee: "불길을 피해 달아나는 중",
   carried: "품에 안겨 있는 중", fuss: "보채는 중", assist: "어른 일을 거드는 중",
   rite: "제단에서 의식을 올리는 중", trade: "물건을 사고파는 중", muster: "나라를 지키러 바닷가에 모인 중",
+  gamble: "도박장에서 내기하는 중", addict: "게임중독으로 집에 틀어박힌 중", counsel: "도박에 빠질 듯한 이를 타이르는 중",
 };
 
 const FUSS_LABEL: Record<string, string> = {

@@ -1,4 +1,6 @@
-// 맹수: 아주 가끔 숲 깊은 곳에서 나타나 사람을 노린다. 섬에서 보낸 날이 길수록 강한 놈이 온다.
+// 맹수: 아주 가끔 숲 깊은 곳에서 나타나 사람을 노린다. 섬에서 보낸 날이 길수록, 섬 사람이 많을수록 강한 놈이 여럿 온다.
+// 마지막에는 하늘을 나는 용이 불을 뿜는다. 맹수는 사람을 다치게 하고 목숨도 앗지만, 한 번의 습격에서
+// 해칠 수 있는 사람 수는 섬 사람 수에 맞춰 정해져 있어 마을을 몰살하지는 않는다.
 // 사람들은 그 시대의 무기를 들고 맞서거나 집으로 숨는다. 망루·성루·포대에 오르면 위에서 쏘아 마을을 지킨다.
 import { DAY, ERA_STRETCH, HOUR, MIN, WALK_SPEED } from "./constants";
 import { hourOf } from "./clock";
@@ -6,7 +8,8 @@ import { BARE_HANDS, HOUSE_TYPES, STRUCTS, TECH_BY_ID, WEAPONS } from "./data";
 import { harm, maxHp } from "./building";
 import { shiftMorale } from "./morale";
 import { blessed } from "./religion";
-import { age, die, feel, lying, say } from "./people";
+import { igniteStructure, startWildfire } from "./fire";
+import { age, die, feel, injure, lying, say } from "./people";
 import { chance, int, range } from "./rng";
 import { addResearch, available } from "./settlement";
 import type { Terrain } from "./terrain";
@@ -18,13 +21,20 @@ export const BEAST_INFO: Record<BeastKind, { name: string; from: number; to: num
   wolf: { name: "늑대", from: 0, to: 2.8, speed: 1.05 },
   bear: { name: "곰", from: 2.8, to: 6, speed: 0.9 },
   tiger: { name: "호랑이", from: 6, to: 12, speed: 1.1 },
-  sabertooth: { name: "검치호", from: 12, to: 24, speed: 1.15 },
+  sabertooth: { name: "검치호", from: 12, to: 20, speed: 1.15 },
+  dragon: { name: "용", from: 20, to: 40, speed: 1.35 },
 };
 
 /** 섬에서 보낸 날에 따라 강해진다: 처음엔 늑대, 몇 달 뒤엔 곰, 해가 바뀌면 호랑이… */
 /** 시대가 느리게 넘어가는 만큼 맹수도 천천히 세진다 (그 시대의 무기로 맞설 수 있게) */
 export const beastPower = (w: WorldState) => 1 + w.time / DAY / (40 * ERA_STRETCH);
-export const kindFor = (pow: number): BeastKind => (pow >= 12 ? "sabertooth" : pow >= 6 ? "tiger" : pow >= 2.8 ? "bear" : "wolf");
+export const kindFor = (pow: number): BeastKind => (pow >= 20 ? "dragon" : pow >= 12 ? "sabertooth" : pow >= 6 ? "tiger" : pow >= 2.8 ? "bear" : "wolf");
+/** 섬 사람이 많을수록 맹수도 세진다 (사람이 적은 섬에는 약한 놈이 온다) */
+export const popMul = (pop: number) => Math.max(0.6, Math.min(1.9, 0.55 + pop / 45));
+/** 이번에 올 맹수의 힘: 섬에서 보낸 날 × 섬 사람 수 */
+export const threatOf = (w: WorldState) => beastPower(w) * popMul(living(w).length);
+/** 하늘에 떠 있는 용 (칼과 창이 닿지 않는다) */
+export const aloft = (b: Beast) => b.kind === "dragon" && (b.fly ?? 0) > 0.45;
 export const biteOf = (b: Beast) => 6 + 3 * Math.pow(b.pow, 0.8);
 /** 같은 종류 안에서 얼마나 큰 놈인지 0..1 (화면 크기) */
 export function growthOf(b: Beast) {
@@ -61,32 +71,46 @@ export function dailyBeasts(w: WorldState) {
 }
 
 /** 사람 눈이 닿지 않는 먼 숲이나 바위 지대에서 나타난다 */
-export function spawnBeasts(w: WorldState, T: Terrain, pow = beastPower(w) * range(w, 0.85, 1.15)) {
+export function spawnBeasts(w: WorldState, T: Terrain, pow = threatOf(w) * range(w, 0.85, 1.15)) {
   const people = living(w);
   const far = (x: number, z: number) => dist(x, z, w.camp.x, w.camp.z) > 50 && people.every((p) => dist(x, z, p.x, p.z) > 35);
   const pt = T.randomPoint(w, (x, z, b) => (b === "forest" || b === "rock" || b === "grass") && far(x, z), 400)
     ?? T.randomPoint(w, (x, z, b) => b === "forest" || b === "grass", 200);
   if (!pt) return [];
-  const kind = kindFor(pow);
-  const pack = kind === "wolf" ? (pow < 1.4 ? int(w, 1, 2) : int(w, 2, 3)) : pow > 14 && chance(w, 0.3) ? 2 : 1;
+  // 용이 올 만큼 강해져도 때로는 검치호 무리가 몰려온다
+  let kind = kindFor(pow);
+  if (kind === "dragon" && chance(w, 0.45)) kind = "sabertooth";
+  // 섬 사람이 많으면 여럿이 몰려온다
+  const pop = people.length;
+  const pack = kind === "wolf" ? Math.min(5, (pow < 1.4 ? int(w, 1, 2) : int(w, 2, 3)) + Math.floor(pop / 20))
+    : kind === "dragon" ? (pop >= 45 && chance(w, 0.4) ? 2 : 1)
+    : Math.max(1, Math.min(3, 1 + Math.floor(pop / 22) - (chance(w, 0.35) ? 1 : 0)));
   const out: Beast[] = [];
   for (let i = 0; i < pack; i++) {
-    const p = pack > 1 ? pow * range(w, 0.75, 0.9) : pow;
+    const p = pack > 1 ? pow * range(w, 0.65, 0.8) : pow;
     const max = Math.round(30 * p);
     const b: Beast = {
       id: newId(w), kind, x: pt.x + range(w, -2, 2), z: pt.z + range(w, -2, 2), rot: range(w, 0, Math.PI * 2),
       st: "prowl", hp: max, max, pow: p, tx: w.camp.x, tz: w.camp.z, target: null, siege: null,
       until: w.time + range(w, 6, 9) * HOUR, stun: 0, atk: 0, home: { x: pt.x, z: pt.z }, born: w.time, foes: [],
     };
+    if (kind === "dragon") {
+      b.fly = 1;
+      b.breath = w.time + range(w, 10, 20) * MIN;
+    }
     w.beasts.push(b);
     out.push(b);
   }
+  // 이번 습격에서 해칠 수 있는 사람 수 (섬 사람이 적을수록 적게, 네 명 이하면 아무도)
+  w.timers.beastKills = 0;
+  w.timers.beastCap = pop <= 6 ? 0 : Math.max(1, Math.floor(pop / 18));
   w.history.beast = (w.history.beast ?? 0) + 1;
   w.history.lastBeast = w.time;
   w.timers.beast = w.time + range(w, 6, 12) * DAY;
   const name = beastName(out[0]);
   const many = pack > 1 ? ` ${pack}마리` : "";
-  chron(w, "beast", hourOf(w.time) >= 19 || hourOf(w.time) < 5
+  if (kind === "dragon") chron(w, "beast", `하늘이 갑자기 어두워지더니 거대한 날갯짓 소리가 섬을 덮었다. ${name}${many}${josa(many || name, "이/가").slice((many || name).length)} 나타났다! 불을 뿜는 그림자가 마을로 향한다!`);
+  else chron(w, "beast", hourOf(w.time) >= 19 || hourOf(w.time) < 5
     ? `어둠 속 숲에서 낮게 으르렁거리는 소리가 들렸다. ${name}${many}${josa(many || name, "이/가").slice((many || name).length)} 나타났다!`
     : `숲 깊은 곳에서 ${name}${many}${josa(many || name, "이/가").slice((many || name).length)} 모습을 드러냈다. 사람을 노리는 눈빛이다!`);
   addFx(w, "roar", pt.x, pt.z, out[0].id, pow);
@@ -97,7 +121,7 @@ export function spawnBeasts(w: WorldState, T: Terrain, pow = beastPower(w) * ran
 // ─── 안전한 곳 ─────────────────────────────────────────────────────────
 
 const SAFE = new Set<StructureType>([...HOUSE_TYPES, "hall", "infirmary", "library", "fort", "battery", "factory", "observatory"]);
-const HIDE_ACTS = new Set(["hide", "sleep", "shelter", "rest", "isolate"]);
+const HIDE_ACTS = new Set(["hide", "sleep", "shelter", "rest", "isolate", "addict"]);
 const usable = (s: Structure) => s.prog >= 1 && (s.dmg ?? 0) < 0.6;
 
 /** 숨을 수 있는 튼튼한 건물 */
@@ -167,6 +191,11 @@ export function strike(w: WorldState, T: Terrain, p: Person, b: Beast, a: Act) {
   if (!active(b) && b.st !== "stun") return;
   const tower = a.sub === "tower" ? findById(w.structures, a.n) : undefined;
   const wp = weaponOf(tower ? bestRanged(w, p) : a.sub);
+  // 하늘에 뜬 용에게는 활과 총, 망루 위에서 쏘는 것만 닿는다
+  if (aloft(b) && !tower && wp.range <= 3) {
+    if (chance(w, 0.15)) say(w, p, "outOfReach", {}, "😤");
+    return;
+  }
   const base = tower ? Math.max(wp.dmg, TOWER[tower.type]?.dmg ?? 0) * 1.15 : wp.dmg;
   const skill = p.skills.hunt ?? 0;
   const role = p.role === "guard" || p.role === "hunter" ? 1.2 : 1;
@@ -202,7 +231,12 @@ function slay(w: WorldState, T: Terrain, b: Beast) {
   b.target = null;
   b.siege = null;
   w.items.push(makeItem(w, "meat", Math.min(14, 3 + Math.round(b.pow)), b.x + 0.6, b.z));
-  w.items.push(makeItem(w, "hide", b.kind === "wolf" ? 1 : 2, b.x - 0.6, b.z + 0.3));
+  w.items.push(makeItem(w, "hide", b.kind === "wolf" ? 1 : b.kind === "dragon" ? 4 : 2, b.x - 0.6, b.z + 0.3));
+  // 용의 둥지에서 모은 보물
+  if (b.kind === "dragon") {
+    w.items.push(makeItem(w, "gold", int(w, 2, 4), b.x, b.z - 0.7));
+    if (chance(w, 0.35)) w.items.push(makeItem(w, "diamond", 1, b.x + 0.4, b.z + 0.7));
+  }
   addFx(w, "catch", b.x, b.z, b.id);
   const foes = b.foes.map((id) => findById(w.people, id)).filter((q): q is Person => !!q && !!q.alive);
   const arms = [...new Set(foes.filter((q) => q.act?.sub !== "tower").map((q) => weaponOf(q.act?.sub).name))].filter((x) => x !== BARE_HANDS.name).slice(0, 2);
@@ -213,8 +247,9 @@ function slay(w: WorldState, T: Terrain, b: Beast) {
     (arms.length === 2 ? `${josa(arms[0], "과/와")} ${josa(arms[1], "을/를")} 들고 ` : arms.length ? `${josa(arms[0], "을/를")} 들고 ` : foes.length && !tower ? "맨손으로 " : "");
   const name = beastName(b);
   const more = w.beasts.some((x) => x !== b && x.born === b.born && active(x));
-  chron(w, "beast", more ? `${who} ${held}${name} 한 마리를 쓰러뜨렸다!` : `${who} ${held}힘을 모아 ${josa(name, "을/를")} 물리쳤다!`);
-  shiftMorale(w, 6 + Math.min(8, b.pow * 0.5));
+  if (b.kind === "dragon") chron(w, "beast", `${who} ${held}마침내 ${josa(name, "을/를")} 쓰러뜨렸다! 섬을 뒤덮던 불길의 그림자가 걷히고, 용이 지키던 금붙이가 땅에 흩어졌다.`);
+  else chron(w, "beast", more ? `${who} ${held}${name} 한 마리를 쓰러뜨렸다!` : `${who} ${held}힘을 모아 ${josa(name, "을/를")} 물리쳤다!`);
+  shiftMorale(w, 6 + Math.min(b.kind === "dragon" ? 14 : 8, b.pow * 0.5));
   for (const q of living(w)) {
     const near = foes.includes(q);
     feel(w, q, "joy", near ? 0.5 : 0.2, near);
@@ -261,8 +296,8 @@ function moveToward(T: Terrain, b: Beast, x: number, z: number, step: number) {
   if (d < 1e-3) return true;
   const k = Math.min(1, step / d);
   const nx = b.x + (x - b.x) * k, nz = b.z + (z - b.z) * k;
-  // 물에는 들어가지 않는다
-  if (T.height(nx, nz) < 0.2 || T.inPond(nx, nz, 0.4)) return true;
+  // 물에는 들어가지 않는다 (하늘을 나는 용은 바다 위로도 날아간다)
+  if (b.kind !== "dragon" && (T.height(nx, nz) < 0.2 || T.inPond(nx, nz, 0.4))) return true;
   b.x = nx;
   b.z = nz;
   b.rot = Math.atan2(z - b.z, x - b.x);
@@ -298,7 +333,8 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
     const pack = w.beasts.filter((x) => x.born === b.born && x !== b);
     if (!pack.some((x) => x.st === "leave")) {
       const name = beastName(b);
-      chron(w, "beast", hurt ? `상처 입은 ${josa(name, "이/가")} 숲 속으로 달아났다.` : `${josa(name, "은/는")} 먹잇감을 찾지 못하고 숲으로 돌아갔다.`);
+      const away = b.kind === "dragon" ? "하늘 저편으로" : "숲 속으로";
+      chron(w, "beast", hurt ? `상처 입은 ${josa(name, "이/가")} ${away} 달아났다.` : b.ate ? `사람을 해친 ${josa(name, "은/는")} ${away} 사라졌다.` : `${josa(name, "은/는")} 먹잇감을 찾지 못하고 ${away} 돌아갔다.`);
       if (hurt) shiftMorale(w, 3);
     }
     bump(w);
@@ -312,6 +348,7 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
     return;
   }
   alarm(w, b);
+  if (b.kind === "dragon") dragonSky(w, T, b, dt);
 
   let tgt: Person | null | undefined = findById(w.people, b.target);
   if (!tgt || !onIsland(tgt) || downed(tgt) || safeFromBeast(w, tgt) || dist(b.x, b.z, tgt.x, tgt.z) > 40 || T.height(tgt.x, tgt.z) < 0.1) tgt = pickTarget(w, T, b);
@@ -327,7 +364,8 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
       b.st = "maul";
       b.rot = Math.atan2(tgt.z - b.z, tgt.x - b.x);
       b.atk -= dt;
-      if (b.atk <= 0 && canBite()) {
+      // 용은 땅에 내려앉아야 문다
+      if (b.atk <= 0 && !aloft(b) && canBite()) {
         b.atk = BITE_EVERY;
         bite(w, T, b, tgt);
         b.bored = Math.max(0, (b.bored ?? 0) - 20 * MIN);
@@ -336,8 +374,14 @@ function beastStep(w: WorldState, T: Terrain, b: Beast, dt: number, bites: Map<n
     return;
   }
   b.bored = (b.bored ?? 0) + dt;
-  // 숨은 사람이 있는 집을 부수려 든다 (곰부터는 힘이 세다)
+  // 숨은 사람이 있는 집을 부수려 든다 (곰부터는 힘이 세다. 용은 위에서 불을 뿜는다)
   const house = b.pow >= 2.8 ? siegeTarget(w, b) : null;
+  if (house && b.kind === "dragon") {
+    b.siege = house.id;
+    b.st = "chase";
+    if (dist(b.x, b.z, house.x, house.z) > 9) moveToward(T, b, house.x, house.z, speed * 1.2 * dt);
+    return;
+  }
   if (house) {
     b.siege = house.id;
     const r = STRUCTS[house.type].radius + 0.7;
@@ -418,10 +462,21 @@ function siegeTarget(w: WorldState, b: Beast) {
   return best;
 }
 
+/** 이번 습격에서 사람을 더 해칠 수 있는지 (섬 사람을 몰살하지 않도록) */
+function mayKill(w: WorldState) {
+  return living(w).length > 6 && (w.timers.beastKills ?? 0) < (w.timers.beastCap ?? 1);
+}
+
 function bite(w: WorldState, T: Terrain, b: Beast, p: Person) {
   const dmg = biteOf(b) * range(w, 0.8, 1.2);
+  const before = p.health;
   p.health = Math.max(0, p.health - dmg);
+  // 쓰러질 만큼 깊이 물리면 그대로 목숨을 잃기도 한다 (힘센 맹수일수록)
+  if (p.health > 0 && p.health < 35 && before >= 35 && !coarse && chance(w, Math.min(0.3, 0.06 + dmg / 200))) p.health = 0;
   if (p.health <= 0 && coarse && chance(w, 0.75)) p.health = range(w, 4, 10);
+  // 해칠 수 있는 만큼 해쳤으면 크게 다치는 데 그친다
+  if (p.health <= 0 && !mayKill(w)) p.health = range(w, 3, 8);
+  injure(w, p, dmg, `${BEAST_INFO[b.kind].name}에게 물림`);
   addFx(w, "bite", p.x, p.z, p.id);
   feel(w, p, "fear", 0.5);
   p.seen.reeval = 0;
@@ -431,8 +486,12 @@ function bite(w: WorldState, T: Terrain, b: Beast, p: Person) {
   const name = BEAST_INFO[b.kind].name;
   if (p.health <= 0) {
     die(w, T, p, "beast");
+    w.timers.beastKills = (w.timers.beastKills ?? 0) + 1;
     shiftMorale(w, -8);
     b.target = null;
+    // 사람을 해친 맹수는 배를 채우고 돌아간다
+    b.ate = 1;
+    b.until = Math.min(b.until, w.time);
     return;
   }
   say(w, p, "bitten", { beast: name }, "🩸", true);
@@ -454,6 +513,65 @@ function bite(w: WorldState, T: Terrain, b: Beast, p: Person) {
       addResearch(w, p, TECH_BY_ID[next].cost * 0.05, next);
     }
   }
+}
+
+// ─── 용 ────────────────────────────────────────────────────────────────
+
+/** 용은 하늘에서 맴돌다 사람을 덮칠 때만 내려앉고, 틈틈이 불을 뿜는다 */
+function dragonSky(w: WorldState, T: Terrain, b: Beast, dt: number) {
+  const tgt = findById(w.people, b.target);
+  const low = b.st === "maul" || (!!tgt && dist(b.x, b.z, tgt.x, tgt.z) < 4);
+  const want = low ? 0 : 1;
+  const f = b.fly ?? 1;
+  b.fly = want > f ? Math.min(1, f + dt / 50) : Math.max(0, f - dt / 35);
+  if (w.time < (b.breath ?? 0)) return;
+  // 불을 뿜을 곳: 노리는 사람, 숨은 사람이 있는 집, 아니면 가까운 나무집
+  let spot: { x: number; z: number } | null = null;
+  if (tgt && dist(b.x, b.z, tgt.x, tgt.z) < 13 && !safeFromBeast(w, tgt)) spot = { x: tgt.x, z: tgt.z };
+  const house = findById(w.structures, b.siege);
+  if (!spot && house && dist(b.x, b.z, house.x, house.z) < 14) spot = house;
+  if (!spot) {
+    const s = w.structures.find((x) => x.prog >= 1 && !x.fp && dist(b.x, b.z, x.x, x.z) < 12 && x.type !== "raft" && x.type !== "farm");
+    if (s) spot = s;
+  }
+  if (!spot) return;
+  b.breath = w.time + range(w, 5, 9) * MIN;
+  b.rot = Math.atan2(spot.z - b.z, spot.x - b.x);
+  breathFire(w, T, b, spot.x, spot.z);
+}
+
+/** 불길을 뿜는다: 건물에 불이 붙고, 풀숲이 타고, 곁에 있던 사람은 덴다 */
+function breathFire(w: WorldState, T: Terrain, b: Beast, x: number, z: number) {
+  addFx(w, "breath", x, z, b.id);
+  let lit = 0;
+  for (const s of w.structures) {
+    if (s.prog < 1 || dist(s.x, s.z, x, z) > STRUCTS[s.type].radius + 2.5) continue;
+    if (chance(w, s.fp ? 0.12 : 0.7) && igniteStructure(w, s, "spread")) lit++;
+    else harm(w, T, s, 0.04, "beast");
+  }
+  if (!lit && chance(w, 0.3)) {
+    const bi = T.biome(x, z);
+    if (bi === "grass" || bi === "forest") startWildfire(w, T, x, z);
+  }
+  for (const q of living(w)) {
+    if (dist(q.x, q.z, x, z) > 2.8 || safeFromBeast(w, q)) continue;
+    const dmg = range(w, 6, 12);
+    q.health = Math.max(mayKill(w) ? 0 : 5, q.health - dmg);
+    injure(w, q, dmg, "용의 불길에 뎀");
+    feel(w, q, "fear", 0.5);
+    say(w, q, "burned", {}, "🔥", true);
+    if (q.act && q.act.k !== "unconscious") q.act = null;
+    if (q.health <= 0) {
+      die(w, T, q, "beast");
+      w.timers.beastKills = (w.timers.beastKills ?? 0) + 1;
+      shiftMorale(w, -8);
+    }
+  }
+  if (w.time - (w.timers.fireLog ?? -1e12) > 6 * HOUR) {
+    w.timers.fireLog = w.time;
+    chron(w, "beast", `${josa(beastName(b), "이/가")} 하늘에서 불길을 내뿜었다! ${lit ? "집에 불이 옮겨붙었다." : "땅이 시뻘겋게 그을렸다."}`);
+  }
+  bump(w);
 }
 
 /** 자다가도 벌떡 일어난다 (정신을 잃은 사람은 그대로) */

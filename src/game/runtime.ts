@@ -9,12 +9,14 @@ import { carerOf, stageName } from "@/sim/childcare";
 import { burnRate, fireScale, scaleName } from "@/sim/fire";
 import { believers, faithLabel, FAITH } from "@/sim/religion";
 import { CURRENCY, money, walletLabel } from "@/sim/economy";
+import { addicted, casinoInfo, gambleLabel } from "@/sim/casino";
+import { civicInfo } from "@/sim/civic";
 import { GOV_NAME, ministerTitle, moodName, nationOf } from "@/sim/nation";
 import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
 import { ILL_NAME } from "@/sim/disease";
 import { groupStage, groupTitle } from "@/sim/society";
 import { applyInteraction, releaseHeld } from "@/sim/interactions";
-import { dominant, mood } from "@/sim/people";
+import { dominant, mood, WOUND_NAME } from "@/sim/people";
 import { hashString } from "@/sim/rng";
 import { currentEra } from "@/sim/settlement";
 import { advance, step } from "@/sim/step";
@@ -57,7 +59,7 @@ interface Dyn {
   fx: Fx[];
   ds: WorldState["disaster"];
   /** 맹수 [id, x, z, 방향, 상태, 체력] */
-  bs?: [number, number, number, number, Beast["st"], number][];
+  bs?: [number, number, number, number, Beast["st"], number, number?][];
   mo?: number;
   /** 바다 건너 와 있는 배 */
   vs?: WorldState["visit"];
@@ -83,8 +85,8 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family", "faith", "trade", "nation"]);
-const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅" };
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family", "faith", "trade", "nation", "casino", "civic"]);
+const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅", dragon: "🐉" };
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
 export function normalizeWorld(raw: WorldState): WorldState {
@@ -339,7 +341,7 @@ export class GameRuntime {
       i: w.items.filter((i) => i.held).map((i) => [i.id, r1(i.x), r1(i.z), i.held ?? 0]),
       fx,
       ds: w.disaster,
-      bs: w.beasts.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp)]),
+      bs: w.beasts.map((b) => (b.kind === "dragon" ? [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp), Math.round((b.fly ?? 0) * 100) / 100] : [b.id, r1(b.x), r1(b.z), r1(b.rot), b.st, Math.round(b.hp)])),
       mo: Math.round(w.morale),
       vs: w.visit,
       bz: w.blazes.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.r), r1(b.heat), b.sid ?? 0, b.sid != null ? r1(findById(w.structures, b.sid)?.dmg ?? 0) : 0, r1(b.max)]),
@@ -386,13 +388,14 @@ export class GameRuntime {
       }
       a.x = x; a.z = z; a.rot = rot; a.st = st as typeof a.st; a.held = held || null;
     }
-    for (const [id, x, z, rot, st, hp] of d.bs ?? []) {
+    for (const [id, x, z, rot, st, hp, fly] of d.bs ?? []) {
       const b = findById(w.beasts, id);
       if (!b) {
         unknown = true;
         continue;
       }
       b.x = x; b.z = z; b.rot = rot; b.st = st; b.hp = hp;
+      if (fly != null) b.fly = fly;
     }
     if (d.mo != null) w.morale = d.mo;
     if (d.vs !== undefined) w.visit = d.vs;
@@ -611,7 +614,7 @@ export class GameRuntime {
       name: p.name,
       age: Math.floor(ageYears(p.birth, t)),
       sex: p.sex,
-      emoji: !p.alive ? "🕯️" : p.away ? (p.away.via === "ship" ? "⛵" : "🌀") : (p.ill ?? 0) >= 3 ? "🤒" : p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌",
+      emoji: !p.alive ? "🕯️" : p.away ? (p.away.via === "ship" ? "⛵" : "🌀") : (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : p.wound?.sev === 2 ? "🩹" : p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌",
       action: !p.alive ? "영원히 잠듦" : p.away ? (p.away.via === "ship" ? "바다 건너 항해 중" : "차원문 너머 여행 중") : actLabel(p.act),
       alive: !!p.alive,
       group: p.group ?? null,
@@ -705,6 +708,8 @@ export class GameRuntime {
       blessings: [...new Set(w.blessings.filter((b) => w.time < b.until).map((b) => b.aim))].map((a) => ({ icon: FAITH[a].icon, name: NAME[a] })),
       faiths: w.religions.map((r) => ({ name: r.name, icon: FAITH[r.aim].icon, wish: FAITH[r.aim].wish, count: believers(w, r).length, rites: r.rites })),
       economy: w.economy ? { currency: CURRENCY[w.economy.era]!.name, treasury: money(w, w.economy.treasury), trades: w.economy.trades } : null,
+      casino: casinoInfo(w),
+      civic: civicInfo(w),
     };
   }
 
@@ -727,7 +732,9 @@ export class GameRuntime {
       : dmg > 0 ? "부서진 곳이 있음"
       : "튼튼함";
     const who = def.cap ? w.people.filter((p) => p.alive && p.home === s.id).map((p) => p.name).join(", ") : "";
-    const note = [TOWER[s.type] ? `맹수가 오면 위에 올라가 쏜다 (사거리 ${towerRange(s)})` : towerNote(w, s), s.fp ? "기와 지붕과 흙벽이라 불이 잘 붙지 않는다" : WOODEN.has(s.type) ? "나무로 지어 불이 붙기 쉽다" : ""].filter(Boolean).join(" · ");
+    const C = w.casino;
+    const casino = s.type === "casino" && C ? (C.open ? `한 번에 ${money(w, C.cap)}까지 걸 수 있다 · 이기면 세 배` : "게임중독에 빠진 사람이 많아 왕이 문을 닫았다") : "";
+    const note = [TOWER[s.type] ? `맹수가 오면 위에 올라가 쏜다 (사거리 ${towerRange(s)})` : towerNote(w, s), casino, s.fp ? "기와 지붕과 흙벽이라 불이 잘 붙지 않는다" : WOODEN.has(s.type) ? "나무로 지어 불이 붙기 쉽다" : ""].filter(Boolean).join(" · ");
     return {
       id: s.id,
       name: s.type === "grave" && s.name ? `${s.name}의 무덤` : def.name,
@@ -783,7 +790,7 @@ export class GameRuntime {
       name: p.name,
       age: Math.floor(ageYears(p.birth, w.time)),
       sex: p.sex,
-      emoji: (p.ill ?? 0) >= 3 ? "🤒" : EMOJI[emo] ?? "😌",
+      emoji: (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : EMOJI[emo] ?? "😌",
       action: p.alive ? actLabel(p.act) : "영원히 잠듦",
       alive: !!p.alive,
       needs: { ...p.needs },
@@ -809,6 +816,8 @@ export class GameRuntime {
       view: view.length ? view.join(" · ") : "중도",
       faith: faithLabel(w, p),
       wallet: walletLabel(w, p),
+      wound: p.wound && p.alive ? `🩹 ${WOUND_NAME[p.wound.sev]} · ${p.wound.by} · ${Math.max(1, Math.ceil((p.wound.until - w.time) / 86400))}일 뒤 아묾` : "",
+      gamble: gambleLabel(w, p),
     };
   }
 }

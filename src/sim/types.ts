@@ -125,7 +125,9 @@ export type StructureType =
   | "infirmary" | "seawall" | "banner" | "hall" | "shipyard" | "portal"
   | "watchtower" | "fort" | "battery" | "townhouse" | "apartment" | "forge" | "factory" | "mine"
   /** 종교의 제단 · 장터 · 왕궁 */
-  | "shrine" | "market" | "palace";
+  | "shrine" | "market" | "palace"
+  /** 나라를 세운 뒤에 짓는 도박장 */
+  | "casino";
 
 export interface Structure {
   id: number;
@@ -181,7 +183,9 @@ export type ActKind =
   /** 아기는 안겨 다니고, 어린이는 떼쓰고 조르고 울고, 일곱 살부터는 어른 일을 거든다 */
   | "carried" | "fuss" | "assist"
   /** 제단에서 올리는 의식 · 물건 바꾸기 · 나라를 지키러 바닷가에 모이기 */
-  | "rite" | "trade" | "muster";
+  | "rite" | "trade" | "muster"
+  /** 도박장에서 한 판 · 게임중독으로 집에 틀어박힘 · 대신이 중독될 만한 사람을 타이름 */
+  | "gamble" | "addict" | "counsel";
 
 export type Anim =
   | "idle" | "walk" | "run" | "chop" | "pick" | "sit" | "sleep" | "eat" | "think" | "knap"
@@ -189,7 +193,8 @@ export type Anim =
   | "dance" | "slump" | "cower" | "stomp" | "startle" | "heart" | "stretch" | "wave" | "pray"
   | "drink" | "throw" | "play" | "cough" | "fight" | "row" | "aim" | "slash" | "mine"
   | "scoop" | "bucket" | "douse"
-  | "held" | "crawl" | "cry" | "tantrum" | "beg" | "hug" | "scold";
+  | "held" | "crawl" | "cry" | "tantrum" | "beg" | "hug" | "scold"
+  | "dice" | "limp";
 
 export interface Act {
   k: ActKind;
@@ -267,6 +272,32 @@ export interface Person {
   /** 가진 돈과 제 몫으로 챙긴 물건 */
   purse?: number;
   pack?: Stock;
+  /** 맹수에게 물리거나 다친 상처 */
+  wound?: Wound | null;
+  /** 도박장에서의 기록과 게임중독 */
+  gamble?: Gamble;
+}
+
+/** 상처: 1 가벼운 상처 · 2 큰 상처. 나을 때까지 절뚝이고 일이 더디다 */
+export interface Wound {
+  sev: 1 | 2;
+  until: number;
+  /** 무엇에 다쳤는지 */
+  by: string;
+}
+
+export interface Gamble {
+  /** 요즘 한 판 수와 이긴 판 수 (날마다 조금씩 잊는다) */
+  plays: number;
+  wins: number;
+  last: number;
+  /** 게임중독: 이 시각까지 집에서 나오지 못한다 */
+  addict?: number;
+  /** 이 시각까지는 도박장에 가지 않는다 (타이름을 들었거나 중독에서 막 벗어났다) */
+  rest?: number;
+  /** 지금까지 딴 돈과 잃은 돈 */
+  won: number;
+  lost: number;
 }
 
 export type KidWant = "hungry" | "play" | "tantrum" | "cry" | "cling" | "sleepy";
@@ -356,6 +387,44 @@ export interface Economy {
   started: number;
 }
 
+/** 도박장: 쌓인 돈은 나라 살림(세금·복지)으로 옮겨 쓴다 */
+export interface Casino {
+  open: boolean;
+  /** 아직 나라 살림으로 옮기지 않은 돈 */
+  bank: number;
+  plays: number;
+  /** 지금까지 사람들이 잃은 돈과 딴 돈 */
+  took: number;
+  paid: number;
+  /** 문을 닫은 시각과 그때 중독되어 있던 사람들 */
+  closed: number;
+  ids: number[];
+  /** 한 번에 걸 수 있는 가장 큰 돈 (대신들이 정한다) */
+  cap: number;
+  /** 왕이 놀이를 권하는 정도 0..1 */
+  push: number;
+  /** 지금까지 게임중독에 빠진 횟수 */
+  addicts: number;
+  /** 조용한 날이 이어진 수 (거는 돈을 다시 풀 때) · 거는 돈 이야기를 남긴 시각 */
+  calm?: number;
+  capLog?: number;
+}
+
+/** 세금으로 고쳐 나가는 것들: 길 · 탈것 · 의료 · 복지 · 무역 */
+export type CivicKind = "road" | "transport" | "medical" | "welfare" | "trade";
+
+export interface Civic {
+  /** 나라 살림 (세금과 도박장에서 모인 돈) */
+  fund: number;
+  lv: Record<CivicKind, number>;
+  /** 백성들이 불편하다고 말한 정도 */
+  voice: Record<CivicKind, number>;
+  /** 마지막으로 백성의 소리를 듣고 고친 시각 */
+  last: number;
+  taxed: number;
+  spent: number;
+}
+
 /** 바다 건너의 다른 나라 */
 export interface Nation {
   id: number;
@@ -414,7 +483,7 @@ export interface Voyage {
   from: { x: number; z: number; rot: number };
 }
 
-export type BeastKind = "wolf" | "bear" | "tiger" | "sabertooth";
+export type BeastKind = "wolf" | "bear" | "tiger" | "sabertooth" | "dragon";
 
 /** 사람을 해칠 수 있는 맹수. 섬에서 보낸 날이 길수록 강한 놈이 나타난다 */
 export interface Beast {
@@ -448,11 +517,17 @@ export interface Beast {
   foes: number[];
   /** 아무도 물지 못하고 헛걸음한 시간 (오래되면 제풀에 물러난다) */
   bored?: number;
+  /** 용: 하늘 높이 떠 있는 정도 0..1, 다음에 불을 뿜을 수 있는 시각 */
+  fly?: number;
+  breath?: number;
+  /** 사람을 해치고 배를 채웠다 (곧 돌아간다) */
+  ate?: number;
 }
 
 export type ChronicleKind =
   | "arrive" | "discover" | "build" | "birth" | "death" | "couple" | "weather" | "gift" | "era" | "misc" | "season"
-  | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family" | "faith" | "trade" | "nation";
+  | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family" | "faith" | "trade" | "nation"
+  | "casino" | "civic";
 
 export interface ChronicleEntry {
   t: number;
@@ -464,7 +539,8 @@ export type FxType =
   | "hit" | "spark" | "ignite" | "fizzle" | "chip" | "shake" | "splash" | "lightning" | "eureka"
   | "drop" | "stun" | "complete" | "birth" | "arrive" | "catch" | "chop"
   | "dust" | "heal" | "clash" | "portal" | "collapse"
-  | "roar" | "shot" | "bite" | "crack" | "douse" | "cry" | "coin" | "pray";
+  | "roar" | "shot" | "bite" | "crack" | "douse" | "cry" | "coin" | "pray"
+  | "breath" | "dice";
 
 export interface Fx {
   id: number;
@@ -505,6 +581,10 @@ export interface WorldState {
     beast?: number; beastAt?: number; moraleLow?: number; weaponGap?: number;
     /** 불이 번진 이야기 · 아이를 혼낸 이야기를 마지막으로 남긴 시각 (연대기가 넘치지 않게) */
     fireLog?: number; scoldLog?: number;
+    /** 이번 습격에서 맹수가 해친 사람 수와 넘지 않을 수 (섬 사람 수에 따라) */
+    beastKills?: number; beastCap?: number;
+    /** 도박 이야기를 마지막으로 남긴 시각 */
+    casinoLog?: number;
   };
   fx: Fx[];
   // ─── v2 ───
@@ -541,6 +621,9 @@ export interface WorldState {
   /** 바다 건너의 나라들과 지금 와 있는 배 */
   nations: Nation[];
   visit: Visit | null;
+  // ─── v6 ───
+  casino: Casino | null;
+  civic: Civic | null;
 }
 
 /** 불길: 건물에 붙었거나(sid) 번개·관찰자의 불씨로 땅에 번진 불 */

@@ -12,6 +12,8 @@ import { dailyMorale } from "./morale";
 import { checkDeath, dailyPeople, hourlyPeople, makeCtx, perceive, updateEmotions, updateNeeds } from "./people";
 import { chooseFocus, foodTotal, houseCapacity, planFarms, planProject } from "./settlement";
 import { dailyEconomy } from "./economy";
+import { dailyCasino, hourlyCasino } from "./casino";
+import { dailyCivic } from "./civic";
 import { dailyReligion } from "./religion";
 import { dailyNation, updateNation } from "./nation";
 import { dailySociety } from "./society";
@@ -55,6 +57,7 @@ export function step(w: WorldState, dt: number) {
     spreadIllness(w);
     planProject(w, T);
     planFarms(w, T);
+    hourlyCasino(w);
     if (!w.tech.focus) chooseFocus(w);
   }
   const d = dayOf(w.time);
@@ -76,6 +79,8 @@ function daily(w: WorldState) {
   dailyReligion(w);
   dailyEconomy(w);
   dailyNation(w, T);
+  dailyCasino(w);
+  dailyCivic(w);
   dailyDisaster(w);
   dailyVoyage(w);
   dailyBeasts(w);

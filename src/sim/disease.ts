@@ -2,6 +2,7 @@
 // 1~5단계로 나빠지거나 나아지며, 3단계는 독감, 5단계는 다른 사람과 떨어져 지내야 한다.
 import { DAY, HOUR } from "./constants";
 import { seasonOf } from "./clock";
+import { clinicMul } from "./civic";
 import { MEDS, STRUCTS } from "./data";
 import { blessed } from "./religion";
 import { clamp } from "./noise";
@@ -144,6 +145,8 @@ export function updateIllness(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   const yrs = age(w, p);
   if (yrs < 8 || yrs > 62) up *= 1.3;
   if (knows(w, "medicine")) down *= 1.2;
+  // 나라가 의료를 넓히면 빨리 낫는다
+  down *= clinicMul(w);
   if (p.flu) {
     up *= 1.6;
     down *= 0.7;

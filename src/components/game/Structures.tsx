@@ -1,8 +1,9 @@
 "use client";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { heightOf } from "@/sim/building";
+import { roadLinks } from "@/sim/civic";
 import { STRUCTS } from "@/sim/data";
 import type { Terrain } from "@/sim/terrain";
 import type { Structure, StructureType } from "@/sim/types";
@@ -546,6 +547,40 @@ function buildModel(type: StructureType, lv = 1): Model {
       ];
       return { geo: merge(parts), windows: merge([part(G.box, { color: "#ffffff", pos: [0.48, 1.2, 0], scale: [0.04, 0.16, 0.16] })]) };
     }
+    case "casino": {
+      // 금빛 기둥에 붉은 지붕을 얹은 놀이터: 앞이 트여 탁자에 둘러선 사람들이 보인다. 간판의 전구는 밤에 빛난다
+      const GOLD = "#e0b84a", RED = "#c0353f", WALL = "#6b2430";
+      const parts = [
+        part(G.box, { color: "#6b5a4e", pos: [0, 0.12, 0], scale: [5.0, 0.24, 4.2] }),
+        part(G.box, { color: "#8e2f3f", pos: [0.05, 0.25, 0], scale: [4.6, 0.04, 3.8] }),
+        part(G.box, { color: WALL, pos: [-2.25, 1.4, 0], scale: [0.25, 2.3, 4.0] }),
+        part(G.box, { color: GOLD, pos: [-2.1, 2.45, 0], scale: [0.1, 0.12, 4.0] }),
+        ...[[2.1, 1.85], [2.1, -1.85], [-2.1, 1.85], [-2.1, -1.85]].map(([x, z]) => part(G.cyl(0.13, 0.15, 2.5, 8), { color: GOLD, pos: [x, 1.35, z] })),
+        part(G.box, { color: GOLD, pos: [0, 2.65, 0], scale: [5.1, 0.16, 4.3] }),
+        part(G.cone(3.55, 1.5, 4), { color: RED, pos: [0, 3.48, 0], rot: [0, Math.PI / 4, 0], scale: [1, 1, 0.84] }),
+        part(G.ico(0.18, 0), { color: GOLD, pos: [0, 4.3, 0] }),
+        // 간판: 붉은 판에 흰 주사위 두 개
+        part(G.box, { color: GOLD, pos: [2.28, 3.05, 0], scale: [0.1, 0.9, 3.0] }),
+        part(G.box, { color: "#b0202e", pos: [2.33, 3.05, 0], scale: [0.06, 0.74, 2.84] }),
+        part(G.box, { color: "#f8f4ea", pos: [2.38, 3.05, 0.55], scale: [0.06, 0.48, 0.48], rot: [0.3, 0, 0] }),
+        part(G.box, { color: "#f8f4ea", pos: [2.38, 3.05, -0.55], scale: [0.06, 0.48, 0.48], rot: [-0.2, 0, 0] }),
+        ...[[0.55, 0], [0.55, 0.12], [-0.55, -0.12], [-0.55, 0.12]].map(([z, dz]) => part(G.box, { color: "#c92a2a", pos: [2.42, 3.05 + dz, z + dz], scale: [0.04, 0.09, 0.09] })),
+        // 입구의 커다란 주사위
+        part(G.box, { color: "#f8f4ea", pos: [2.95, 0.5, 1.75], scale: [0.6, 0.6, 0.6], rot: [0, 0.5, 0] }),
+        part(G.box, { color: "#c92a2a", pos: [3.05, 0.42, -1.75], scale: [0.5, 0.5, 0.5], rot: [0, -0.4, 0] }),
+      ];
+      for (const z of [0.95, -0.95]) {
+        parts.push(part(G.box, { color: "#2f7d4f", pos: [0.3, 0.82, z], scale: [1.4, 0.08, 0.8] }));
+        parts.push(part(G.box, { color: "#5a3b26", pos: [0.3, 0.86, z], scale: [1.48, 0.04, 0.88] }));
+        parts.push(part(G.box, { color: "#6e4a30", pos: [0.3, 0.53, z], scale: [0.18, 0.56, 0.18] }));
+        parts.push(part(G.box, { color: "#f4f1ea", pos: [0.15, 0.91, z + 0.1], scale: [0.1, 0.1, 0.1], rot: [0, 0.5, 0] }));
+        parts.push(part(G.box, { color: "#f4f1ea", pos: [0.42, 0.91, z - 0.12], scale: [0.1, 0.1, 0.1], rot: [0, 1.1, 0] }));
+        parts.push(part(G.cyl(0.07, 0.07, 0.08, 8), { color: "#ffd43b", pos: [0.7, 0.9, z] }));
+        parts.push(part(G.cyl(0.07, 0.07, 0.16, 8), { color: "#e03131", pos: [-0.1, 0.94, z] }));
+      }
+      const bulbs = [-1.3, -0.65, 0, 0.65, 1.3].map((z) => part(G.ico(0.07, 0), { color: "#ffffff", pos: [2.38, 2.6, z] }));
+      return { geo: merge(parts), windows: merge(bulbs) };
+    }
     case "portal": {
       // 돌기둥 사이의 고리 (안쪽 빛은 따로 그린다)
       const parts = [
@@ -692,6 +727,8 @@ export function Structures({ terrain }: { terrain: Terrain }) {
       <Fires terrain={terrain} />
       <Specials terrain={terrain} />
       <Stockpile terrain={terrain} />
+      <Roads terrain={terrain} />
+      <Ride terrain={terrain} />
     </group>
   );
 }
@@ -982,6 +1019,109 @@ const portalMat = new THREE.ShaderMaterial({
 });
 
 /** 창고 옆에 쌓인 자원 */
+// ─── 세금으로 닦은 길과 들인 탈것 ───────────────────────────────────
+
+/** 길: 흙길 → 자갈길 → 돌길 → 포장도로 */
+const ROAD_COLOR = ["", "#b08d5e", "#bcb3a2", "#9a958c", "#4c4f55"];
+const ROAD_WIDTH = [0, 0.9, 1.1, 1.3, 1.6];
+const ROAD_MAX = 2400;
+
+function Roads({ terrain }: { terrain: Terrain }) {
+  const rt = useRuntime();
+  const version = useWorldVersion(400);
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color: ROAD_COLOR[1], roughness: 1, flatShading: true }), []);
+  useEffect(() => {
+    const w = rt.world;
+    const m = mesh.current;
+    if (!w || !m) return;
+    const { lv, to } = roadLinks(w);
+    let n = 0;
+    if (lv) {
+      mat.color.set(ROAD_COLOR[lv]);
+      const width = ROAD_WIDTH[lv];
+      const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), s = new THREE.Vector3();
+      const c = w.camp;
+      for (const t of to) {
+        const len = Math.hypot(t.x - c.x, t.z - c.z);
+        if (len < 3) continue;
+        const ang = Math.atan2(t.z - c.z, t.x - c.x);
+        const step = 1.4;
+        // 모닥불 둘레와 건물 바로 앞까지만
+        for (let d = 1.6; d < len - 1.5 && n < ROAD_MAX; d += step) {
+          const x = c.x + Math.cos(ang) * d, z = c.z + Math.sin(ang) * d;
+          const h = terrain.height(x, z);
+          if (h < 0.1) continue;
+          const h2 = terrain.height(x + Math.cos(ang) * 0.7, z + Math.sin(ang) * 0.7);
+          const h0 = terrain.height(x - Math.cos(ang) * 0.7, z - Math.sin(ang) * 0.7);
+          q.setFromEuler(e.set(0, -ang, Math.atan2(h2 - h0, 1.4), "YXZ"));
+          M.compose(p.set(x, h + 0.03, z), q, s.set(step + 0.15, 0.06, width));
+          m.setMatrixAt(n++, M);
+        }
+      }
+    }
+    m.count = n;
+    m.instanceMatrix.needsUpdate = true;
+    m.computeBoundingSphere();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, terrain]);
+  return (
+    <instancedMesh ref={mesh} args={[undefined, undefined, ROAD_MAX]} material={mat} receiveShadow frustumCulled={false}>
+      <boxGeometry args={[1, 1, 1]} />
+    </instancedMesh>
+  );
+}
+
+/** 탈것: 창고 곁에 세워 둔다 (손수레 → 소달구지 → 마차 → 자동차) */
+const RIDE_GEO: THREE.BufferGeometry[] = [
+  merge([part(G.box, { color: WOOD, pos: [0, 0.5, 0], scale: [0.2, 0.2, 0.2] })]),
+  merge([
+    part(G.box, { color: WOOD, pos: [0, 0.55, 0], scale: [1.2, 0.3, 0.8] }),
+    part(G.box, { color: WOOD_D, pos: [0.95, 0.45, 0.25], scale: [0.8, 0.06, 0.06] }),
+    part(G.box, { color: WOOD_D, pos: [0.95, 0.45, -0.25], scale: [0.8, 0.06, 0.06] }),
+    ...[0.48, -0.48].map((z) => part(G.cyl(0.32, 0.32, 0.08, 10), { color: "#5a3b26", pos: [-0.1, 0.32, z], rot: [Math.PI / 2, 0, 0] })),
+  ]),
+  merge([
+    part(G.box, { color: WOOD, pos: [-0.6, 0.65, 0], scale: [1.6, 0.4, 1.0] }),
+    ...[0.58, -0.58].map((z) => part(G.cyl(0.38, 0.38, 0.08, 10), { color: "#5a3b26", pos: [-0.6, 0.38, z], rot: [Math.PI / 2, 0, 0] })),
+    part(G.box, { color: "#6b4a32", pos: [1.1, 0.85, 0], scale: [1.2, 0.6, 0.55] }),
+    part(G.box, { color: "#6b4a32", pos: [1.85, 0.95, 0], scale: [0.4, 0.38, 0.36] }),
+    part(G.cone(0.05, 0.25, 4), { color: "#f4ead2", pos: [1.85, 1.22, 0.18] }),
+    part(G.cone(0.05, 0.25, 4), { color: "#f4ead2", pos: [1.85, 1.22, -0.18] }),
+    ...[[0.7, 0.18], [0.7, -0.18], [1.5, 0.18], [1.5, -0.18]].map(([x, z]) => part(G.box, { color: "#5e412b", pos: [x, 0.3, z], scale: [0.14, 0.6, 0.14] })),
+  ]),
+  merge([
+    part(G.box, { color: "#7a3b2a", pos: [-0.6, 1.0, 0], scale: [1.5, 0.9, 1.1] }),
+    part(G.box, { color: "#5a3b26", pos: [-0.6, 1.52, 0], scale: [1.6, 0.1, 1.2] }),
+    ...[[-1.1, 0.6], [-1.1, -0.6], [-0.1, 0.6], [-0.1, -0.6]].map(([x, z]) => part(G.cyl(0.36, 0.36, 0.08, 10), { color: "#3e2a1c", pos: [x, 0.38, z], rot: [Math.PI / 2, 0, 0] })),
+    part(G.box, { color: "#f0e6d6", pos: [1.25, 1.0, 0], scale: [1.1, 0.55, 0.42] }),
+    part(G.box, { color: "#f0e6d6", pos: [1.9, 1.3, 0], scale: [0.36, 0.42, 0.3], rot: [0, 0, -0.4] }),
+    ...[[0.9, 0.14], [0.9, -0.14], [1.6, 0.14], [1.6, -0.14]].map(([x, z]) => part(G.box, { color: "#d9cbb5", pos: [x, 0.38, z], scale: [0.12, 0.76, 0.12] })),
+  ]),
+  merge([
+    part(G.box, { color: "#2f6fb0", pos: [0, 0.55, 0], scale: [2.4, 0.5, 1.1] }),
+    part(G.box, { color: "#24578c", pos: [-0.15, 1.0, 0], scale: [1.3, 0.45, 1.0] }),
+    part(G.box, { color: "#cfe8ff", pos: [0.52, 1.0, 0], scale: [0.04, 0.36, 0.9] }),
+    ...[[0.8, 0.56], [0.8, -0.56], [-0.8, 0.56], [-0.8, -0.56]].map(([x, z]) => part(G.cyl(0.3, 0.3, 0.16, 12), { color: "#222326", pos: [x, 0.3, z], rot: [Math.PI / 2, 0, 0] })),
+    part(G.box, { color: "#ffe9a8", pos: [1.21, 0.62, 0.38], scale: [0.03, 0.12, 0.2] }),
+    part(G.box, { color: "#ffe9a8", pos: [1.21, 0.62, -0.38], scale: [0.03, 0.12, 0.2] }),
+  ]),
+];
+
+function Ride({ terrain }: { terrain: Terrain }) {
+  const rt = useRuntime();
+  const version = useWorldVersion(1000);
+  const w = rt.world;
+  const lv = w?.civic?.lv.transport ?? 0;
+  const st = w?.structures.find((s) => s.type === "storage" && s.prog >= 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const at = useMemo(() => (st ? { x: st.x + Math.cos(st.rot + 1.2) * 3.4, z: st.z + Math.sin(st.rot + 1.2) * 3.4, r: st.rot + 0.3 } : null), [version, st?.id]);
+  if (!lv || !at) return null;
+  return (
+    <mesh geometry={RIDE_GEO[Math.min(4, lv)]} material={vcMat} position={[at.x, terrain.height(at.x, at.z), at.z]} rotation-y={-at.r} castShadow />
+  );
+}
+
 function Stockpile({ terrain }: { terrain: Terrain }) {
   const rt = useRuntime();
   const logs = useRef<THREE.InstancedMesh>(null);

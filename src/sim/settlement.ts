@@ -4,6 +4,8 @@ import { newProject } from "./building";
 import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
 import { moraleMul, shiftMorale } from "./morale";
 import { needShrine } from "./religion";
+import { addictShare, wantCasino } from "./casino";
+import { rideMul } from "./civic";
 import { wantMarket } from "./economy";
 import { govMul, wantPalace } from "./nation";
 import { range, rand } from "./rng";
@@ -49,7 +51,9 @@ export function researchMul(w: WorldState) {
   // 사람이 많아져도 깨침이 그만큼 곧바로 빨라지지는 않는다 (생각이 서로 겹친다)
   const pop = living(w).length;
   const crowd = Math.min(1, Math.max(0.42, Math.sqrt(14 / Math.max(14, pop))));
-  return m * moraleMul(w) * govMul(w) * crowd * ERA_PACE[currentEra(w)];
+  // 게임중독에 빠진 사람이 많으면 일손도 생각도 무뎌진다
+  const addicts = 1 - Math.min(0.6, addictShare(w) * 1.2);
+  return m * moraleMul(w) * govMul(w) * crowd * addicts * ERA_PACE[currentEra(w)];
 }
 
 export function chooseFocus(w: WorldState) {
@@ -151,7 +155,7 @@ export function storagePoint(w: WorldState) {
 }
 
 export function carryCap(w: WorldState) {
-  return 3 + (stockOf(w, "basket") >= 1 ? 3 : 0) + (knows(w, "wheel") ? 4 : 0);
+  return Math.round((3 + (stockOf(w, "basket") >= 1 ? 3 : 0) + (knows(w, "wheel") ? 4 : 0)) * rideMul(w));
 }
 
 export function toolMul(w: WorldState) {
@@ -315,6 +319,8 @@ export function planProject(w: WorldState, T: Terrain) {
   if (wantPalace(w)) want.unshift("palace");
   // 돈이 돌기 시작하면 장터를 세운다
   if (wantMarket(w) && knows(w, "polished")) want.push("market");
+  // 나라를 세우면 도박장을
+  if (wantCasino(w)) want.push("casino");
 
   // 믿는 사람이 셋 넘는 종교는 제단을 쌓는다
   const faith = needShrine(w);

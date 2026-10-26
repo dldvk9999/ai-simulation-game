@@ -54,6 +54,9 @@ export interface PersonDetail extends PersonSummary {
   /** 믿는 종교 · 가진 돈과 꾸러미 */
   faith: string;
   wallet: string;
+  /** 상처 · 도박장 기록 */
+  wound: string;
+  gamble: string;
 }
 
 /** 눌러 본 건물 */
@@ -113,6 +116,9 @@ export interface HudState {
   /** 종교와 경제 (사람들 패널) */
   faiths: { name: string; icon: string; wish: string; count: number; rites: number }[];
   economy: { currency: string; treasury: string; trades: number } | null;
+  /** 도박장 · 나라 살림 (세금) */
+  casino: { open: boolean; cap: string; addicts: number; plays: number; net: string; push: boolean } | null;
+  civic: { fund: string; taxed: string; spent: string; done: string; voice: string } | null;
   structId: number | null;
   structure: StructDetail | null;
   selectedId: number | null;
@@ -160,6 +166,8 @@ export const useHud = create<HudState>(() => ({
   blessings: [],
   faiths: [],
   economy: null,
+  casino: null,
+  civic: null,
   structId: null,
   structure: null,
   selectedId: null,

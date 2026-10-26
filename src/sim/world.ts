@@ -19,7 +19,7 @@ export function addFx(w: WorldState, type: FxType, x: number, z: number, ref?: n
 export function chron(w: WorldState, k: ChronicleKind, text: string) {
   w.chronicle.push({ t: w.time, k, text: `${dayOf(w.time)}일째 · ${text}` });
   w.stats.chron = (w.stats.chron ?? w.chronicle.length - 1) + 1;
-  if (w.chronicle.length > CHRONICLE_LIMIT) {
+  while (w.chronicle.length > CHRONICLE_LIMIT) {
     // 날씨·계절 같은 가벼운 기록부터 지운다
     const light = w.chronicle.findIndex((c) => c.k === "weather" || c.k === "season");
     w.chronicle.splice(light >= 0 && light < w.chronicle.length - 20 ? light : 0, 1);
@@ -86,11 +86,17 @@ export function removeById<T extends { id: number }>(list: T[], id: number) {
 
 // ─── 생성 ──────────────────────────────────────────────────────────────
 
+/** 식물의 방향과 크기는 번호에서 정해진다 (저장하지 않아도 어디서나 같게) */
+export function plantLook(id: number) {
+  let h = Math.imul(id ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return { rot: ((h >>> 0) % 6283) / 1000, s: 0.8 + (((h >>> 0) >>> 12) % 401) / 1000 };
+}
+
 export function makePlant(w: WorldState, kind: PlantKind, x: number, z: number, g = 1): Plant {
-  return {
-    id: newId(w), kind, x, z, g, fruit: 0, rot: rand(w) * Math.PI * 2, s: range(w, 0.8, 1.2),
-    stump: 0, regrow: 0, burn: 0,
-  };
+  const id = newId(w);
+  return { id, kind, x, z, g, fruit: 0, ...plantLook(id), stump: 0, regrow: 0, burn: 0 };
 }
 
 export function makeRock(w: WorldState, kind: RockKind, x: number, z: number, ore?: Metal): Rock {
@@ -281,6 +287,8 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     economy: null,
     nations: [],
     visit: null,
+    casino: null,
+    civic: null,
   };
 
   // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
@@ -447,8 +455,9 @@ export function migrateWorld(w: WorldState) {
   w.timers.beast ??= w.time + 3 * DAY;
   w.history.beast ??= 0;
   w.history.lastBeast ??= 0;
-  // 저장할 때 뺀 식물의 0 값을 채운다
+  // 저장할 때 뺀 식물의 0 값과 번호로 정해지는 모양을 채운다
   for (const p of w.plants) {
+    Object.assign(p, plantLook(p.id));
     p.fruit ??= 0;
     p.stump ??= 0;
     p.regrow ??= 0;
@@ -462,6 +471,8 @@ export function migrateWorld(w: WorldState) {
   w.visit ??= null;
   w.history.fire ??= 0;
   w.history.lastFire ??= 0;
+  w.casino ??= null;
+  w.civic ??= null;
   for (const p of w.people) {
     p.ill ??= 0;
     p.group ??= null;

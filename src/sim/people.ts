@@ -132,7 +132,7 @@ export function homeOf(w: WorldState, p: Person) {
 export function sheltered(w: WorldState, p: Person) {
   const a = p.act;
   if (!a || a.ph !== 1) return false;
-  if (a.k !== "sleep" && a.k !== "shelter" && a.k !== "rest" && a.k !== "isolate" && a.k !== "hide") return false;
+  if (a.k !== "sleep" && a.k !== "shelter" && a.k !== "rest" && a.k !== "isolate" && a.k !== "hide" && a.k !== "addict") return false;
   const h = a.k === "isolate"
     ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1)
     : homeOf(w, p) ?? (a.k === "rest" ? w.structures.find((s) => s.type === "infirmary" && s.prog >= 1) : undefined);
@@ -184,9 +184,25 @@ export function updateNeeds(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   if (n.hunger < 5) dh -= 4;
   if (n.thirst < 5) dh -= 8;
   if (n.warmth < 15) dh -= 3.5 * (1 - n.warmth / 15);
-  if (n.hunger > 35 && n.thirst > 35 && n.warmth > 30 && (p.ill ?? 0) < 2) dh += (asleep ? 3 : 1.2) * (knows(w, "medicine") ? 1.8 : 1);
+  if (n.hunger > 35 && n.thirst > 35 && n.warmth > 30 && (p.ill ?? 0) < 2) dh += (asleep ? 3 : 1.2) * (knows(w, "medicine") ? 1.8 : 1) * (p.wound ? 0.5 : 1);
   p.health = clamp(p.health + dh * h, 0, 100);
+  // 상처가 아문다
+  if (p.wound && w.time >= p.wound.until) {
+    p.wound = null;
+    say(w, p, "healed", {}, "😌");
+  }
 }
+
+/** 다친다: 깊이 다칠수록 오래 가고, 의료가 나아질수록 빨리 낫는다 */
+export function injure(w: WorldState, p: Person, dmg: number, by: string) {
+  const sev: 1 | 2 = dmg >= 20 || p.health < 40 ? 2 : 1;
+  const care = 1 - 0.15 * (w.civic?.lv.medical ?? 0) - (knows(w, "medicine") ? 0.15 : 0);
+  const days = (sev === 2 ? range(w, 3, 4.5) : range(w, 1, 1.8)) * care;
+  const cur = p.wound;
+  p.wound = { sev: cur && cur.sev > sev ? cur.sev : sev, until: Math.max(cur?.until ?? 0, w.time + days * DAY), by: sev >= (cur?.sev ?? 0) ? by : cur!.by };
+}
+
+export const WOUND_NAME = ["", "가벼운 상처", "큰 상처"] as const;
 
 export function updateEmotions(w: WorldState, ctx: Ctx, p: Person, dt: number) {
   const N = p.traits.neuroticism;
@@ -355,6 +371,9 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
 
 /** 매일 한 번 */
 export function dailyPeople(w: WorldState, T: Terrain) {
+  // 섬을 떠난(세상을 떠난) 사람과의 정과 거의 모르는 사이는 잊는다 (저장이 불어나지 않게)
+  const ids = new Set(w.people.map((q) => String(q.id)));
+  for (const q of w.people) for (const [k, v] of Object.entries(q.rel)) if (!ids.has(k) || Math.abs(v) < 0.02) delete q.rel[k];
   const alive = living(w);
   // 노환
   for (const p of alive) {

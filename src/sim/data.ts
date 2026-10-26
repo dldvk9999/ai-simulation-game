@@ -102,11 +102,11 @@ export interface StructDef {
   use: Purpose;
 }
 
-export type Purpose = "home" | "defense" | "craft" | "food" | "store" | "civic" | "sea" | "mine" | "care" | "faith" | "trade" | "rule" | "misc";
+export type Purpose = "home" | "defense" | "craft" | "food" | "store" | "civic" | "sea" | "mine" | "care" | "faith" | "trade" | "rule" | "play" | "misc";
 export const PURPOSE_NAME: Record<Purpose, string> = {
   home: "사람이 잠자는 곳", defense: "맹수를 막는 곳", craft: "도구를 만드는 곳", food: "먹을 것을 마련하는 곳", store: "물건을 쌓아 두는 곳",
   civic: "함께 모이고 배우는 곳", sea: "바다로 나가는 곳", mine: "광석을 캐는 곳", care: "아픈 사람을 돌보는 곳",
-  faith: "믿음을 모아 의식을 올리는 곳", trade: "물건을 사고파는 곳", rule: "왕이 나라를 다스리는 곳", misc: "",
+  faith: "믿음을 모아 의식을 올리는 곳", trade: "물건을 사고파는 곳", rule: "왕이 나라를 다스리는 곳", play: "돈을 걸고 내기를 즐기는 곳", misc: "",
 };
 
 export const STRUCTS: Record<StructureType, StructDef> = {
@@ -147,6 +147,7 @@ export const STRUCTS: Record<StructureType, StructDef> = {
   mine: { name: "광산", cost: { wood: 14, stick: 8, rope: 2 }, work: 10, tech: "mining", radius: 2.2, hp: 260, h: 2.4, use: "mine" },
   shrine: { name: "제단", cost: { stone: 8, wood: 3 }, work: 4, tech: "agriculture", radius: 1.7, hp: 140, h: 2.4, use: "faith" },
   market: { name: "장터", cost: { wood: 8, stick: 6, fiber: 4 }, work: 5, tech: "polished", radius: 2.6, hp: 110, h: 2.2, use: "trade" },
+  casino: { name: "도박장", cost: { wood: 16, stone: 14, metal: 3 }, work: 14, tech: "writing", radius: 3, hp: 360, h: 3, use: "play" },
   palace: { name: "왕궁", cost: { stone: 30, wood: 18, metal: 4 }, work: 26, tech: "masonry", radius: 4.2, hp: 760, h: 5.2, use: "rule" },
 };
 

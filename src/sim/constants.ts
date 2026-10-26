@@ -30,7 +30,7 @@ export const MAX_POP = 60;
 export const NATION_POP = 30;
 /** 이만큼 모이면 조직이나 문명을 이룰 수 있다 */
 export const GROUP_POP = 10;
-export const CHRONICLE_LIMIT = 240;
+export const CHRONICLE_LIMIT = 170;
 /** 시대가 넘어가는 데 걸리는 날이 처음보다 2.5배 길다 (맹수가 세지는 빠르기도 이에 맞춘다) */
 export const ERA_STRETCH = 2.5;
 /** 그러려면 시대마다 연구가 이만큼 더디다 (표류자가 가져오는 지식·사람이 느는 빠르기는 그대로라서 1/2.5보다 작다) */
@@ -39,4 +39,4 @@ export const ERA_PACE = [0.11, 0.12, 0.25, 0.26, 0.26];
 /** 오래 비워둔 섬을 따라잡을 때 허용하는 최대 게임 시간(현실 약 60일). */
 export const MAX_CATCHUP = DAY * 72 * 60;
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;

@@ -6,6 +6,7 @@ import { FOOD, RES_NAME } from "./data";
 import { clamp } from "./noise";
 import { age, feel, lying, say } from "./people";
 import { chance, int } from "./rng";
+import { levy } from "./civic";
 import { currentEra } from "./settlement";
 import { josa } from "./text";
 import type { Act, Person, Res, Stock, WorldState } from "./types";
@@ -85,7 +86,8 @@ export function payWage(w: WorldState, p: Person, res: Res, qty: number) {
   if (!E || age(w, p) < 12) return qty;
   const pay = Math.min(E.treasury, Math.max(1, Math.round(priceOf(res) * qty * 0.5)));
   E.treasury -= pay;
-  p.purse = (p.purse ?? 0) + pay;
+  // 나라가 서면 품삯의 한 할은 세금으로
+  p.purse = (p.purse ?? 0) + levy(w, pay);
   if (qty >= 2 && KEEP.has(res) && chance(w, 0.12) && packed(p, res) < 3) {
     give(p, res, 1);
     return qty - 1;

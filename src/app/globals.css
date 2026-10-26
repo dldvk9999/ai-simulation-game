@@ -627,6 +627,51 @@ button {
 .person .ill.lv4 { background: #fff0d6; color: #9a5a00; }
 .person .ill.lv5 { background: #ffd8cc; color: #a33a1a; font-weight: bold; }
 
+/* 사람 카드: 기본 정보 아래로 접고 펼치는 칸 */
+.pbasic { min-width: 0; }
+.prow { font-size: 13px; margin-top: 2px; color: #5a4a3a; }
+.prow .pk {
+  display: inline-block;
+  min-width: 30px;
+  margin-right: 4px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.person .follow-btn { margin-top: 10px; }
+.sects { margin-top: 10px; border-top: 1px solid var(--line); }
+.sect { border-bottom: 1px solid var(--line); }
+.sect-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  color: #5a4a3a;
+  text-align: left;
+  cursor: pointer;
+}
+.sect-head:hover { color: var(--accent); }
+.sect-head .chev { display: inline-block; width: 12px; font-size: 10px; color: var(--ink-soft); transition: transform 0.15s; }
+.sect.open .sect-head .chev { transform: rotate(90deg); }
+.sect-head .st { font-weight: bold; flex: none; }
+.sect-head .sh {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.sect-body { padding: 0 2px 10px; }
+.sect-body > .bars:first-child,
+.sect-body > .thought:first-child,
+.sect-body > .meta:first-child { margin-top: 2px; }
+.sect-body .alerts { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+
 .plist {
   list-style: none;
   padding: 0;
@@ -1159,3 +1204,7 @@ button {
 .toast.k-trade { color: #2b8a3e; }
 .chron .k-nation,
 .toast.k-nation { color: #b8860b; }
+.chron .k-casino,
+.toast.k-casino { color: #c2255c; }
+.chron .k-civic,
+.toast.k-civic { color: #1971c2; }

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { InstallButton } from "@/components/InstallButton";
 import { useHud, type GroupSummary, type PersonSummary } from "@/game/hud";
 import type { ChronicleEntry } from "@/sim/types";
@@ -114,6 +114,11 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
           {s.beast && (
             <span className="chip alert">
               {s.beast.icon} {s.beast.name}{s.beast.count > 1 ? ` ${s.beast.count}마리` : ""} 출몰
+            </span>
+          )}
+          {s.casino && (!s.casino.open || s.casino.addicts > 0) && (
+            <span className={`chip ${s.casino.open ? "" : "alert"}`} title="게임중독에 빠지면 사흘 동안 집에서 나오지 못해요">
+              {s.casino.open ? `🎰 게임중독 ${s.casino.addicts}명` : `⛔ 도박장 닫힘${s.casino.addicts ? ` · 중독 ${s.casino.addicts}명` : ""}`}
             </span>
           )}
           <span className={`chip morale ${s.morale >= 75 ? "hi" : s.morale >= 50 ? "" : s.morale >= 35 ? "low" : "bad"}`} title="사기가 높으면 일과 연구가 잘 되고, 낮으면 마음이 가라앉아요">
@@ -271,64 +276,119 @@ function Bar({ v, color, label }: { v: number; color: string; label: string }) {
   );
 }
 
+/** 사람 카드에서 펼쳐 둔 칸 (다른 사람을 눌러도 그대로, 이 브라우저에만 기억한다) */
+const OPEN_KEY = "island:card-open";
+function readOpen(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function Section({ id, title, hint, open, onToggle, children }: { id: string; title: string; hint?: string; open: boolean; onToggle: (id: string) => void; children: ReactNode }) {
+  return (
+    <div className={`sect ${open ? "open" : ""}`}>
+      <button className="sect-head" aria-expanded={open} onClick={() => onToggle(id)}>
+        <span className="chev" aria-hidden>▸</span>
+        <span className="st">{title}</span>
+        {!open && hint && <span className="sh">{hint}</span>}
+      </button>
+      {open && <div className="sect-body">{children}</div>}
+    </div>
+  );
+}
+
 function PersonCard() {
   const p = useHud((s) => s.selected);
   const followId = useHud((s) => s.followId);
+  const [open, setOpen] = useState<Record<string, boolean>>(readOpen);
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify(open));
+    } catch {}
+  }, [open]);
   if (!p) return null;
+  const toggle = (id: string) => setOpen((o) => ({ ...o, [id]: !o[id] }));
+  const job = p.role || (p.age < 16 ? "아직 어려요" : "맡은 일 없음");
+  const alerts = [p.illName && `🤒 ${p.illName}`, p.wound && "🩹 다침", p.preg && "🤰"].filter(Boolean).join(" · ");
   return (
     <div className="card person">
       <div className="phead">
         <span className="big">{p.emoji}</span>
-        <div>
+        <div className="pbasic">
           <div className="pn">
-            {p.name} <span className="sub">{p.sex === "M" ? "♂" : "♀"} {p.age}세</span>
+            {p.name} <span className="sub">{p.sex === "M" ? "♂ 남자" : "♀ 여자"} · {p.age}세</span>
           </div>
-          <div className="sub">
-            {p.alive ? `${p.mainEmotion} · ${p.action}` : "영원히 잠들었어요"}
-            {p.preg && " · 🤰"}
-          </div>
-          {p.illName && <div className={`ill lv${p.ill}`}>🤒 {p.illName} ({p.ill}단계)</div>}
+          <div className="prow"><span className="pk">직업</span> {job}</div>
+          <div className="prow"><span className="pk">지금</span> {p.alive ? p.action : "영원히 잠들었어요"}</div>
         </div>
-        <button className="x" onClick={() => useHud.setState({ selectedId: null, followId: null })}>✕</button>
+        <button className="x" aria-label="닫기" onClick={() => useHud.setState({ selectedId: null, followId: null })}>✕</button>
       </div>
-      {p.thought && <div className="thought">“{p.thought}”</div>}
-      {p.alive && (
-        <>
-          <div className="bars">
-            <Bar v={p.health} color="#ff8787" label="건강" />
-            {NEED_LABEL.map(([k, l, c]) => (
-              <Bar key={k} v={p.needs[k as keyof typeof p.needs]} color={c} label={l} />
-            ))}
-          </div>
-          <div className="emos">
-            {EMO_LABEL.map(([k, l, c]) => {
-              const v = p.emo[k as keyof typeof p.emo];
-              return (
-                <span key={k} className="emo-dot" style={{ opacity: 0.25 + v * 0.75 }} title={`${l} ${Math.round(v * 100)}`}>
-                  <i style={{ background: c, transform: `scale(${0.5 + v * 0.8})` }} />
-                  {l}
-                </span>
-              );
-            })}
-          </div>
-        </>
-      )}
-      <div className="meta">
-        {p.groupName && <div>🏳️ {p.groupName}{p.role && ` · ${p.role}`}</div>}
-        {p.traits.length > 0 && <div>🧭 {p.traits.join(" · ")}</div>}
-        <div>💭 뜻: {p.view}</div>
-        {p.faith && <div>🙏 {p.faith}</div>}
-        {p.wallet && <div>{p.wallet}</div>}
-        <div>💗 {p.likes}</div>
-        <div>🏠 {p.home}{p.carry && ` · 🎒 ${p.carry}`}</div>
-        {p.family.length > 0 && <div>👪 {p.family.join(" · ")}</div>}
-        {p.skills.length > 0 && <div>🛠 {p.skills.join(" · ")}</div>}
-      </div>
-      {!p.away && (
+      {!p.away && p.alive && (
         <button className="follow-btn" onClick={() => useHud.setState({ followId: followId === p.id ? null : p.id })}>
           {followId === p.id ? "따라가기 멈추기" : "따라가기"}
         </button>
       )}
+      <div className="sects">
+        {p.alive && (
+          <Section id="state" title="상태" hint={alerts || `${p.mainEmotion} · 건강 ${Math.round(p.health)}`} open={!!open.state} onToggle={toggle}>
+            {(p.illName || p.wound) && (
+              <div className="alerts">
+                {p.illName && <div className={`ill lv${p.ill}`}>🤒 {p.illName} ({p.ill}단계)</div>}
+                {p.wound && <div className="ill lv3">{p.wound}</div>}
+              </div>
+            )}
+            <div className="bars">
+              <Bar v={p.health} color="#ff8787" label="건강" />
+              {NEED_LABEL.map(([k, l, c]) => (
+                <Bar key={k} v={p.needs[k as keyof typeof p.needs]} color={c} label={l} />
+              ))}
+            </div>
+            <div className="emos">
+              {EMO_LABEL.map(([k, l, c]) => {
+                const v = p.emo[k as keyof typeof p.emo];
+                return (
+                  <span key={k} className="emo-dot" style={{ opacity: 0.25 + v * 0.75 }} title={`${l} ${Math.round(v * 100)}`}>
+                    <i style={{ background: c, transform: `scale(${0.5 + v * 0.8})` }} />
+                    {l}
+                  </span>
+                );
+              })}
+            </div>
+            {p.preg && <div className="meta">🤰 아기를 가졌어요</div>}
+          </Section>
+        )}
+        <Section id="mind" title="마음" hint={p.thought ? `“${p.thought}”` : p.traits.slice(0, 2).join(" · ")} open={!!open.mind} onToggle={toggle}>
+          {p.thought && <div className="thought">“{p.thought}”</div>}
+          <div className="meta">
+            {p.traits.length > 0 && <div>🧭 {p.traits.join(" · ")}</div>}
+            <div>💭 뜻: {p.view}</div>
+            <div>💗 {p.likes}</div>
+          </div>
+        </Section>
+        <Section id="family" title="가족과 집" hint={p.home} open={!!open.family} onToggle={toggle}>
+          <div className="meta">
+            <div>🏠 {p.home}{p.carry && ` · 🎒 ${p.carry}`}</div>
+            {p.family.length > 0 ? <div>👪 {p.family.join(" · ")}</div> : <div className="sub">아직 가족이 없어요</div>}
+          </div>
+        </Section>
+        {(p.groupName || p.faith || p.wallet || p.gamble) && (
+          <Section id="society" title="소속과 살림" hint={p.groupName.split(" · ")[0]} open={!!open.society} onToggle={toggle}>
+            <div className="meta">
+              {p.groupName && <div>🏳️ {p.groupName}</div>}
+              {p.faith && <div>🙏 {p.faith}</div>}
+              {p.wallet && <div>{p.wallet}</div>}
+              {p.gamble && <div>{p.gamble}</div>}
+            </div>
+          </Section>
+        )}
+        {p.skills.length > 0 && (
+          <Section id="skills" title="재주" hint={p.skills[0]} open={!!open.skills} onToggle={toggle}>
+            <div className="meta">🛠 {p.skills.join(" · ")}</div>
+          </Section>
+        )}
+      </div>
     </div>
   );
 }
@@ -437,6 +497,8 @@ function SocietyInfo() {
   const nation = useHud((s) => s.nation);
   const faiths = useHud((s) => s.faiths);
   const eco = useHud((s) => s.economy);
+  const civic = useHud((s) => s.civic);
+  const casino = useHud((s) => s.casino);
   if (!nation && !faiths.length && !eco) return null;
   return (
     <>
@@ -470,6 +532,25 @@ function SocietyInfo() {
         <>
           <h3>경제</h3>
           <div className="society">{eco.currency} · 나라 곳간 {eco.treasury} · 거래 {eco.trades.toLocaleString()}번</div>
+        </>
+      )}
+      {civic && (
+        <>
+          <h3>나라 살림</h3>
+          <div className="society">
+            <div>💰 모인 돈 {civic.fund} · 거둔 세금 {civic.taxed} · 쓴 돈 {civic.spent}</div>
+            {civic.done && <div className="sub">고친 것: {civic.done}</div>}
+            {civic.voice && <div className="sub">🗣️ 요즘 백성들: {civic.voice}</div>}
+          </div>
+        </>
+      )}
+      {casino && (
+        <>
+          <h3>🎲 도박장</h3>
+          <div className="society">
+            <div>{casino.open ? `문 열림 · 한 번에 ${casino.cap}까지` : "⛔ 왕이 문을 닫음"}{casino.push && casino.open ? " · 왕이 적당한 놀이를 권하는 중" : ""}</div>
+            <div className="sub">판 {casino.plays.toLocaleString()}번 · 나라 살림에 보탠 돈 {casino.net}{casino.addicts > 0 ? ` · 🎰 게임중독 ${casino.addicts}명` : ""}</div>
+          </div>
         </>
       )}
     </>
