@@ -726,6 +726,7 @@ export class GameRuntime {
     // 현실 1분(게임 72분)에 깎이는 내구도
     const perMin = blaze ? Math.max(1, Math.round(burnRate(w, blaze, s) * 1.2 * maxHp(s))) : 0;
     const state = blaze ? `🔥 ${scaleName(fireScale(w, blaze))} · 내구도가 1분에 ${perMin}씩 줄어드는 중`
+      : s.raze != null ? (s.raze > 0 ? `해체하는 중 ${Math.round(s.raze * 100)}%` : "비워 두었다가 낮에 아무도 없을 때 해체할 옛 건물")
       : s.plan === 0 && s.prog < 1 ? "설계를 기다리는 중"
       : s.prog < 1 ? `짓는 중 ${Math.round(s.prog * 100)}%`
       : dmg >= 0.6 ? "크게 부서져 쓸 수 없음 · 고칠 사람을 기다리는 중"

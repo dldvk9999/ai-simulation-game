@@ -3,7 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { heightOf } from "@/sim/building";
-import { roadLinks } from "@/sim/civic";
+import { PLAZA, roadNet, roadWidth } from "@/sim/town";
 import { STRUCTS } from "@/sim/data";
 import type { Terrain } from "@/sim/terrain";
 import type { Structure, StructureType } from "@/sim/types";
@@ -649,7 +649,8 @@ function StructureMesh({ s, terrain }: { s: Structure & { burnt?: boolean }; ter
   const flatOnGround = s.type === "farm" || s.type === "pen" || s.type === "grave";
   const groundY = s.type === "dock" ? 0 : s.type === "raft" ? Math.max(-0.15, terrain.height(s.x, s.z)) : terrain.height(s.x, s.z) - (flatOnGround ? 0.1 : 0.05);
   const done = s.prog >= 1;
-  const sy = done ? 1 : planning ? 0.02 : 0.12 + 0.88 * s.prog;
+  const razing = s.raze != null;
+  const sy = done ? 1 - (s.raze ?? 0) * 0.8 : planning ? 0.02 : 0.12 + 0.88 * s.prog;
   // 밭·우리는 땅의 기울기를 따라 눕힌다
   const tilt = useMemo(() => {
     if (!flatOnGround) return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -s.rot);
@@ -670,7 +671,7 @@ function StructureMesh({ s, terrain }: { s: Structure & { burnt?: boolean }; ter
         <mesh geometry={model.geo} material={s.burnt ? charMat : s.fp ? fpMat : vcMat} castShadow receiveShadow />
         {model.windows && <mesh geometry={model.windows} material={windowMat} />}
       </group>
-      {dmg > 0 && (
+      {(dmg > 0 || razing) && (
         <>
           <mesh geometry={rubbleGeo} material={vcMat} scale={Math.max(0.6, def.radius * 0.55)} castShadow />
           {[[1, 1], [-1, -1]].map(([x, z], i) => (
@@ -713,7 +714,7 @@ export function Structures({ terrain }: { terrain: Terrain }) {
     if (now - last.current < 1500) return;
     last.current = now;
     // 짓는 중이거나 불타는 건물이 있으면 모양(기울기·그을음)을 자주 고친다
-    if (rt.world?.structures.some((s) => s.prog < 1) || rt.world?.blazes.length) setTick((t) => t + 1);
+    if (rt.world?.structures.some((s) => s.prog < 1 || (s.raze ?? 0) > 0) || rt.world?.blazes.length) setTick((t) => t + 1);
   });
   const list = useMemo(() => (rt.world ? rt.world.structures.map((s) => ({ ...s, burnt: rt.world!.blazes.some((b) => b.sid === s.id) })) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1021,43 +1022,63 @@ const portalMat = new THREE.ShaderMaterial({
 /** 창고 옆에 쌓인 자원 */
 // ─── 세금으로 닦은 길과 들인 탈것 ───────────────────────────────────
 
-/** 길: 흙길 → 자갈길 → 돌길 → 포장도로 */
-const ROAD_COLOR = ["", "#b08d5e", "#bcb3a2", "#9a958c", "#4c4f55"];
-const ROAD_WIDTH = [0, 0.9, 1.1, 1.3, 1.6];
-const ROAD_MAX = 2400;
+/** 길: 밟아 다진 오솔길 → (나라가 닦으면) 흙길 → 자갈길 → 돌길 → 포장도로 */
+const ROAD_COLOR = ["#a8916a", "#b08d5e", "#bcb3a2", "#9a958c", "#4c4f55"];
+const ROAD_MAX = 4000;
 
 function Roads({ terrain }: { terrain: Terrain }) {
   const rt = useRuntime();
   const version = useWorldVersion(400);
   const mesh = useRef<THREE.InstancedMesh>(null);
-  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color: ROAD_COLOR[1], roughness: 1, flatShading: true }), []);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color: ROAD_COLOR[0], roughness: 1, flatShading: true }), []);
   useEffect(() => {
     const w = rt.world;
     const m = mesh.current;
     if (!w || !m) return;
-    const { lv, to } = roadLinks(w);
+    const net = roadNet(w, terrain);
     let n = 0;
-    if (lv) {
-      mat.color.set(ROAD_COLOR[lv]);
-      const width = ROAD_WIDTH[lv];
+    if (net.segs.length) {
+      mat.color.set(ROAD_COLOR[net.lv]);
       const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), s = new THREE.Vector3();
       const c = w.camp;
-      for (const t of to) {
-        const len = Math.hypot(t.x - c.x, t.z - c.z);
-        if (len < 3) continue;
-        const ang = Math.atan2(t.z - c.z, t.x - c.x);
-        const step = 1.4;
-        // 모닥불 둘레와 건물 바로 앞까지만
-        for (let d = 1.6; d < len - 1.5 && n < ROAD_MAX; d += step) {
-          const x = c.x + Math.cos(ang) * d, z = c.z + Math.sin(ang) * d;
-          const h = terrain.height(x, z);
-          if (h < 0.1) continue;
-          const h2 = terrain.height(x + Math.cos(ang) * 0.7, z + Math.sin(ang) * 0.7);
-          const h0 = terrain.height(x - Math.cos(ang) * 0.7, z - Math.sin(ang) * 0.7);
-          q.setFromEuler(e.set(0, -ang, Math.atan2(h2 - h0, 1.4), "YXZ"));
-          M.compose(p.set(x, h + 0.03, z), q, s.set(step + 0.15, 0.06, width));
-          m.setMatrixAt(n++, M);
+      // 건물 바닥과 겹치는 곳에는 길을 놓지 않는다 (옮겨 짓기 전까지 끊겨 보인다)
+      const solid = w.structures
+        .filter((x) => x.type !== "raft" && x.type !== "banner" && x.type !== "grave" && x.type !== "campfire")
+        .map((x) => ({ x: x.x, z: x.z, r: STRUCTS[x.type].radius * 0.7 }));
+      const covered = (x: number, z: number) => solid.some((o) => Math.abs(o.x - x) < o.r && Math.abs(o.z - z) < o.r && Math.hypot(o.x - x, o.z - z) < o.r);
+      /** 길 한 조각: 땅의 앞뒤 기울기와 옆 기울기를 따라 눕힌다 */
+      const tile = (x: number, z: number, ang: number, len: number, width: number) => {
+        const h = terrain.height(x, z);
+        if (h < 0.1 || n >= ROAD_MAX) return;
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        const hf = terrain.height(x + ca * len * 0.5, z + sa * len * 0.5), hb = terrain.height(x - ca * len * 0.5, z - sa * len * 0.5);
+        const hl = terrain.height(x - sa * width * 0.5, z + ca * width * 0.5), hr = terrain.height(x + sa * width * 0.5, z - ca * width * 0.5);
+        q.setFromEuler(e.set(-Math.atan2(hl - hr, width), -ang, Math.atan2(hf - hb, len), "YXZ"));
+        M.compose(p.set(x, Math.max(h, (hl + hr) / 2) + 0.04, z), q, s.set(len + 0.12, 0.08, width));
+        m.setMatrixAt(n++, M);
+      };
+      for (const g of net.segs) {
+        const len = Math.hypot(g.bx - g.ax, g.bz - g.az);
+        if (len < 0.5) continue;
+        const ang = Math.atan2(g.bz - g.az, g.bx - g.ax);
+        const width = roadWidth(net.lv, g.main);
+        const k = Math.max(1, Math.round(len / 1.4));
+        const step = len / k;
+        for (let i = 0; i < k; i++) {
+          const t = (i + 0.5) / k;
+          const x = g.ax + (g.bx - g.ax) * t, z = g.az + (g.bz - g.az) * t;
+          if (Math.hypot(x - c.x, z - c.z) < PLAZA - 0.3 || covered(x, z)) continue;
+          tile(x, z, ang, step, width);
         }
+      }
+      // 모닥불 둘레의 광장
+      const base = Math.atan2(c.z, c.x);
+      for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+        const u = i * 1.1, v = j * 1.1;
+        if (Math.hypot(u, v) > PLAZA + 0.2 || Math.hypot(u, v) < 0.9) continue;
+        const x = c.x + u * Math.cos(base) - v * Math.sin(base), z = c.z + u * Math.sin(base) + v * Math.cos(base);
+        if (covered(x, z)) continue;
+        tile(x, z, base, 1.1, 1.1);
       }
     }
     m.count = n;

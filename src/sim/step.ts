@@ -10,7 +10,7 @@ import { spreadIllness, updateIllness } from "./disease";
 import { METAL_INFO } from "./data";
 import { dailyMorale } from "./morale";
 import { checkDeath, dailyPeople, hourlyPeople, makeCtx, perceive, updateEmotions, updateNeeds } from "./people";
-import { chooseFocus, foodTotal, houseCapacity, planFarms, planProject } from "./settlement";
+import { chooseFocus, foodTotal, houseCapacity, hourlyTown, planFarms, planProject } from "./settlement";
 import { dailyEconomy } from "./economy";
 import { dailyCasino, hourlyCasino } from "./casino";
 import { dailyCivic } from "./civic";
@@ -57,6 +57,7 @@ export function step(w: WorldState, dt: number) {
     spreadIllness(w);
     planProject(w, T);
     planFarms(w, T);
+    hourlyTown(w, T);
     hourlyCasino(w);
     if (!w.tech.focus) chooseFocus(w);
   }

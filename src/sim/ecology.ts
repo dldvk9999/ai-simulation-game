@@ -6,6 +6,7 @@ import { chance, pick, pRate, rand, range } from "./rng";
 import type { Terrain } from "./terrain";
 import type { AnimalKind, PlantKind, WorldState } from "./types";
 import { addFx, bump, dist, findById, makeAnimal, makeItem, makePlant, nearest, spawnFish } from "./world";
+import { onRoad } from "./town";
 
 const GROW_DAYS: Record<PlantKind, number> = {
   palm: 5, tree: 5, pine: 6, fruit: 5, bush: 2, fiber: 1, herb: 1.5, crop: 2.5,
@@ -84,6 +85,8 @@ export function updatePlants(w: WorldState, T: Terrain, dt: number) {
 
 function nearCamp(w: WorldState, x: number, z: number) {
   if (dist(x, z, w.camp.x, w.camp.z) < 7) return true;
+  // 길 위에는 자라지 않는다
+  if (onRoad(w, x, z)) return true;
   for (const s of w.structures) if (dist(x, z, s.x, s.z) < 3.5) return true;
   return false;
 }

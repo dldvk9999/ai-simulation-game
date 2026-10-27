@@ -356,5 +356,5 @@ export const repairCost = (s: Structure) => {
   return out;
 };
 
-export const damaged = (w: WorldState) => w.structures.filter((s) => (s.dmg ?? 0) > 0 && s.prog >= 1);
+export const damaged = (w: WorldState) => w.structures.filter((s) => (s.dmg ?? 0) > 0 && s.prog >= 1 && s.raze == null);
 

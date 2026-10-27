@@ -27,7 +27,8 @@ import {
 } from "./people";
 import { chance, int, rand, range } from "./rng";
 import {
-  addResearch, assignHomes, blockedByFound, buildMul, carryCap, completeStructure, houseCapacity, isHouse, projects, toolMul,
+  addResearch, assignHomes, blockedByFound, buildMul, carryCap, completeStructure, demolish, houseCapacity, isHouse, occupied, projects,
+  razeHours, razeTarget, toolMul,
 } from "./settlement";
 import { campOf, easeWar, enemies, socialize, warOf } from "./society";
 import { josa } from "./text";
@@ -57,7 +58,7 @@ const ROLE_TAGS: Record<Role, string[]> = {
   farmer: ["farm", "tame"],
   fisher: ["fish"],
   hunter: ["hunt", "catch", "defend"],
-  builder: ["build", "repair", "design", "gather:wood", "gather:stone"],
+  builder: ["build", "repair", "raze", "design", "gather:wood", "gather:stone"],
   scholar: ["think", "design"],
   crafter: ["craft", "gather:iron", "gather:copper", "gather:tin"],
   healer: ["nurse", "dig", "gather:herb", "craft:herbal", "craft:remedy", "craft:medicine"],
@@ -206,8 +207,8 @@ export function runPerson(w: WorldState, ctx: Ctx, p: Person, dt: number) {
 }
 
 function speedOf(w: WorldState, p: Person, a: Act) {
-  // 나라가 길을 닦고 탈것을 들이면 빨리 다닌다
-  let s = WALK_SPEED * roadMul(w);
+  // 길 위에서는 빨리 다닌다 (나라가 닦은 길일수록, 탈것을 들이면 더)
+  let s = WALK_SPEED * roadMul(w, p.x, p.z);
   if (a.run) s *= 1.7;
   const yrs = age(w, p);
   if (yrs < 3) s *= 0.3;
@@ -356,7 +357,7 @@ function animFor(a: Act): Anim {
     case "medicate": return "drink";
     case "dig": return "dig";
     case "council": return "talk";
-    case "repair": return "hammer";
+    case "repair": case "raze": return "hammer";
     case "fight": return "fight";
     case "board": return "wave";
     case "evacuate": return "cower";
@@ -421,6 +422,7 @@ function start(w: WorldState, ctx: Ctx, p: Person, a: Act | null) {
     case "nurse": say(w, p, "nurse", {}, "🩹"); break;
     case "dig": say(w, p, "dig", {}, "⛏️"); break;
     case "repair": say(w, p, "repair", {}, "🔨"); break;
+    case "raze": say(w, p, "raze", {}, "🪓"); break;
     case "fight": say(w, p, "fight", {}, "💢"); break;
     case "evacuate": say(w, p, "tsunami", {}, "🌊", true); break;
     case "defend": say(w, p, "defend", {}, a.sub === "tower" ? "🏹" : "⚔️", true); break;
@@ -511,6 +513,12 @@ function arrive(w: WorldState, ctx: Ctx | null, p: Person, a: Act) {
     }
     case "fish": case "leisure": {
       if (a.n != null) p.rot = a.n;
+      break;
+    }
+    case "raze": {
+      const st = findById(w.structures, a.tid);
+      if (!st || st.raze == null || !razeHours(w) || occupied(w, st)) return abort(p);
+      p.rot = Math.atan2(st.z - p.z, st.x - p.x);
       break;
     }
     case "repair": {
@@ -660,6 +668,23 @@ function work(w: WorldState, ctx: Ctx, p: Person, a: Act, dt: number) {
         say(w, p, "repaired", {}, "🏠", true);
         addFx(w, "complete", st.x, st.z, st.id);
         bump(w);
+        a.t = 0;
+      }
+      break;
+    }
+    case "raze": {
+      // 낮에, 아무도 없을 때만 허문다
+      const st = findById(w.structures, a.tid);
+      if (!st || st.raze == null || !razeHours(w) || occupied(w, st)) {
+        a.t = 0;
+        break;
+      }
+      st.raze = Math.min(1, st.raze + (dt / (Math.max(0.4, STRUCTS[st.type].work * 0.3) * HOUR)) * skill(p, "build") * buildMul(w));
+      if (st.raze >= 1) {
+        demolish(w, st, p);
+        feel(w, p, "joy", 0.2);
+        say(w, p, "razeDone", {}, "🧱", true);
+        practice(p, "build");
         a.t = 0;
       }
       break;
@@ -1582,6 +1607,12 @@ function finishFish(w: WorldState, ctx: Ctx, p: Person, a: Act) {
 }
 
 const FARM_SLOTS = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+/** 밭의 i번째 고랑 자리 (밭이 놓인 방향을 따라 돈다) */
+function farmSlot(f: Structure, i: number) {
+  const [ox, oz] = FARM_SLOTS[i];
+  const c = Math.cos(f.rot), s = Math.sin(f.rot);
+  return { x: f.x + (ox * c - oz * s) * 1.1, z: f.z + (ox * s + oz * c) * 1.1 };
+}
 
 function farmWork(w: WorldState) {
   const farms = w.structures.filter((s) => s.type === "farm" && s.prog >= 1);
@@ -1597,8 +1628,7 @@ function farmWork(w: WorldState) {
   for (const f of farms) {
     for (let i = 0; i < FARM_SLOTS.length; i++) {
       if (busy.has(`${f.id}:${i}`)) continue;
-      const [ox, oz] = FARM_SLOTS[i];
-      const x = f.x + ox * 1.1, z = f.z + oz * 1.1;
+      const { x, z } = farmSlot(f, i);
       if (!crops.some((c) => c.farm === f.id && dist(c.x, c.z, x, z) < 0.5)) empty.push({ f, i });
     }
   }
@@ -1613,8 +1643,8 @@ function planFarm(w: WorldState, p: Person, work: ReturnType<typeof farmWork>): 
   }
   if (seasonOf(w.time) === 3 || !work.empty.length) return null;
   const { f, i } = work.empty.shift()!;
-  const [ox, oz] = FARM_SLOTS[i];
-  return act(w, "farm", f.x + ox * 1.1 + 0.6, f.z + oz * 1.1, 10 * MIN, { tid: f.id, sub: "plant", n: i });
+  const at = farmSlot(f, i);
+  return act(w, "farm", at.x + 0.6, at.z, 10 * MIN, { tid: f.id, sub: "plant", n: i });
 }
 
 function finishFarm(w: WorldState, ctx: Ctx, p: Person, a: Act) {
@@ -1626,8 +1656,7 @@ function finishFarm(w: WorldState, ctx: Ctx, p: Person, a: Act) {
   if (a.sub === "plant") {
     const f = findById(w.structures, a.tid);
     if (!f) return abort(p);
-    const [ox, oz] = FARM_SLOTS[a.n ?? 0];
-    const x = f.x + ox * 1.1, z = f.z + oz * 1.1;
+    const { x, z } = farmSlot(f, a.n ?? 0);
     if (w.plants.some((q) => q.kind === "crop" && q.farm === f.id && dist(q.x, q.z, x, z) < 0.5)) return abort(p);
     const c = makePlant(w, "crop", x, z, 0.05);
     c.farm = f.id;
@@ -1751,7 +1780,7 @@ function leisurePlan(w: WorldState, ctx: Ctx, p: Person): Act | null {
     const sp = T.shorePoint(ang, sub === "swim" ? -3 : sub === "draw" ? 1.5 : 3);
     return act(w, "leisure", sp.x, sp.z, t, { sub, n: ang });
   }
-  const bench = nearest(w.structures, p.x, p.z, (s) => s.type === "bench" && s.prog >= 1, 30);
+  const bench = nearest(w.structures, p.x, p.z, (s) => s.type === "bench" && s.prog >= 1 && s.raze == null, 30);
   if (bench && (sub === "sing" || sub === "sea")) {
     const s = spot(p, bench.x, bench.z, 0.4);
     return act(w, "leisure", s.x, s.z, t, { sub: "sing", n: bench.rot });
@@ -2119,13 +2148,27 @@ function decide(w: WorldState, ctx: Ctx, p: Person): Act | null {
   if (!kid && w.time - (p.seen.buildFail ?? -1e9) > 0.5 * HOUR) {
     const ps = projects(w);
     const grave = ps.find((s) => s.type === "grave");
-    const proj = grave ?? ps.find((s) => s.plan !== 0 && (s.paid || hasStock(w, STRUCTS[s.type].cost)));
+    // 터에 걷어 낼 것이 남아 있으면 그것부터 치운다
+    const proj = grave ?? ps.find((s) => s.plan !== 0 && (s.paid || hasStock(w, STRUCTS[s.type].cost))
+      && !w.structures.some((x) => x.raze != null && dist(x.x, x.z, s.x, s.z) < STRUCTS[s.type].radius + STRUCTS[x.type].radius));
     if (proj && (proj.paid || hasStock(w, STRUCTS[proj.type].cost))) {
       const housing = isHouse(proj.type) && houseCapacity(w) < ctx.pop ? 0.12 : 0;
       add("build", 0.34 + 0.3 * C + (proj.type === "grave" ? 0.35 : 0) + housing - (elder ? 0.1 : 0), () => {
         const ang = Math.atan2(p.z - proj.z, p.x - proj.x);
         const r = STRUCTS[proj.type].radius + 0.5;
         return act(w, "build", proj.x + Math.cos(ang) * r, proj.z + Math.sin(ang) * r, 1 * HOUR, { tid: proj.id });
+      });
+    }
+  }
+
+  // 옮겨 지은 뒤 비워 둔 옛 건물은 낮에 아무도 없을 때 해체한다
+  if (!kid && !teen && w.structures.some((s) => s.raze != null)) {
+    const old = (ctx.memo.raze ??= razeTarget(w)) as Structure | null;
+    if (old) {
+      add("raze", 0.34 + 0.25 * C - (elder ? 0.1 : 0), () => {
+        const ang = Math.atan2(p.z - old.z, p.x - old.x);
+        const r = STRUCTS[old.type].radius + 0.6;
+        return act(w, "raze", old.x + Math.cos(ang) * r, old.z + Math.sin(ang) * r, 1 * HOUR, { tid: old.id });
       });
     }
   }
@@ -2299,7 +2342,7 @@ export const ACT_LABEL: Record<ActKind, string> = {
   care: "아이를 돌보는 중", collect: "줍는 중", react: "", unconscious: "정신을 잃은 상태",
   explore: "섬을 둘러보는 중", tame: "짐승을 길들이는 중", play: "노는 중", follow: "따라가는 중",
   rest: "앓아누워 쉬는 중", isolate: "떨어져서 요양하는 중", nurse: "아픈 사람을 돌보는 중", medicate: "약을 먹는 중",
-  dig: "땅을 파며 약재를 찾는 중", council: "모여서 의논하는 중", repair: "부서진 곳을 고치는 중",
+  dig: "땅을 파며 약재를 찾는 중", council: "모여서 의논하는 중", repair: "부서진 곳을 고치는 중", raze: "비워 둔 옛 건물을 해체하는 중",
   evacuate: "높은 곳으로 피하는 중", fight: "다투는 중", board: "떠날 채비를 하는 중",
   defend: "맹수와 맞서 싸우는 중", hide: "맹수를 피해 숨은 중", design: "건물을 설계하는 중",
   douse: "물을 퍼 날라 불을 끄는 중", flee: "불길을 피해 달아나는 중",

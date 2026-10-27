@@ -1,9 +1,10 @@
 "use client";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { makeRng, range, rand } from "@/sim/rng";
 import type { Terrain } from "@/sim/terrain";
+import { onNet, roadNet, type RoadNet } from "@/sim/town";
 import type { Plant, PlantKind } from "@/sim/types";
 import { useRuntime, useWorldVersion } from "./context";
 import { env } from "./env";
@@ -290,7 +291,11 @@ export function Flora({ terrain }: { terrain: Terrain }) {
 
 /** 장식용 풀과 꽃 (저장되지 않음) */
 function GrassDecor({ terrain }: { terrain: Terrain }) {
+  const rt = useRuntime();
   const grassRef = useRef<THREE.InstancedMesh>(null);
+  // 길이 새로 나면 그 위의 풀과 꽃은 걷는다
+  const [net, setNet] = useState<RoadNet | null>(null);
+  const checked = useRef(0);
   const flowerRef = useRef<THREE.InstancedMesh>(null);
   const { grassGeo, flowerGeo, mat } = useMemo(() => {
     const parts = [];
@@ -314,7 +319,7 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
       for (let k = 0; k < n * 6 && c < n; k++) {
         const x = range(r, -120, 120), z = range(r, -120, 120);
         const b = terrain.biome(x, z);
-        if (!ok(b, x, z)) continue;
+        if (!ok(b, x, z) || (net && onNet(net, x, z))) continue;
         tmpP.set(x, terrain.height(x, z) - 0.02, z);
         tmpQ.setFromEuler(tmpE.set(0, rand(r) * 6.28, 0));
         tmpS.setScalar(range(r, 0.7, 1.4));
@@ -329,9 +334,17 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
     };
     place(grassRef.current, 8800, (b) => b === "grass" || b === "forest");
     place(flowerRef.current, 1760, (b) => b === "grass", ["#ffffff", "#ffe066", "#ff9ec7", "#c7a4ff", "#ffb36b"]);
-  }, [terrain]);
+  }, [terrain, net]);
 
   useFrame(() => {
+    const now = performance.now();
+    if (rt.world && now - checked.current > 2000) {
+      checked.current = now;
+      // 길 모양이 바뀔 때만 다시 심는다 (건물만 바뀌면 그대로)
+      const n = roadNet(rt.world, terrain);
+      const key = (x: RoadNet | null) => (x ? `${x.segs.length}:${[...x.edges].reduce((s, k) => (s + k) % 1e9, 0)}:${x.extra.size}` : "");
+      if (n !== net && key(n) !== key(net)) setNet(n);
+    }
     tintFor("bush", env.season, env.seasonT, [mat.uniforms.uTint.value, mat.uniforms.uTint2.value]);
     mat.uniforms.uSnow.value = env.snowCover;
     if (flowerRef.current) flowerRef.current.visible = env.season !== 3 && env.snowCover < 0.4;

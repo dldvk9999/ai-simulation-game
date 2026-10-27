@@ -1,5 +1,5 @@
 import { DAY, ERA_PACE, HOUR, TIME_SCALE } from "./constants";
-import { ageYears } from "./clock";
+import { ageYears, hourOf } from "./clock";
 import { newProject } from "./building";
 import { ERAS, FOOD, HOUSE_TYPES, STRUCTS, TECH_BY_ID, TECHS, type TechDef } from "./data";
 import { moraleMul, shiftMorale } from "./morale";
@@ -8,11 +8,13 @@ import { addictShare, wantCasino } from "./casino";
 import { rideMul } from "./civic";
 import { wantMarket } from "./economy";
 import { govMul, wantPalace } from "./nation";
-import { range, rand } from "./rng";
+import { pick, range, rand } from "./rng";
 import type { Terrain } from "./terrain";
 import { josa, thought } from "./text";
+import { engulfed, graveSite, lotSite, misplaced, MOVABLE_ROCK, OFFGRID, onRoad, roadNet, sited } from "./town";
 import type { Person, Res, Stock, Structure, StructureType, WorldState } from "./types";
-import { addFx, bump, chron, dist, findById, knows, living, makeStructure, stockOf } from "./world";
+import { addFx, addStock, bump, chron, dist, findById, knows, living, makeStructure, stockOf } from "./world";
+import { say } from "./people";
 
 // ─── 연구 ──────────────────────────────────────────────────────────────
 
@@ -180,7 +182,7 @@ export function buildMul(w: WorldState) {
 
 export const isHouse = (t: StructureType) => HOUSE_TYPES.includes(t);
 /** 쓸 수 있는 집 (크게 부서진 집은 고치기 전까지 못 쓴다) */
-export const houses = (w: WorldState) => w.structures.filter((s) => isHouse(s.type) && s.prog >= 1 && (s.dmg ?? 0) < 0.6);
+export const houses = (w: WorldState) => w.structures.filter((s) => isHouse(s.type) && s.prog >= 1 && (s.dmg ?? 0) < 0.6 && s.raze == null);
 
 export function houseCapacity(w: WorldState) {
   let c = 0;
@@ -261,7 +263,8 @@ export function bestHouse(w: WorldState): StructureType | null {
 
 /** 다음 건설 과제를 정한다 (한 번에 하나, 밭과 무덤은 예외). 용도에 맞는 건물을 그때그때 고른다 */
 export function planProject(w: WorldState, T: Terrain) {
-  const active = projects(w).filter((s) => s.type !== "grave" && s.type !== "farm");
+  // 옮겨 짓는 공사는 따로 센다
+  const active = projects(w).filter((s) => s.type !== "grave" && s.type !== "farm" && s.replaces == null);
   if (active.length >= 1) return;
   const pop = living(w).filter((p) => ageYears(p.birth, w.time) >= 3).length;
   if (!pop) return;
@@ -287,16 +290,21 @@ export function planProject(w: WorldState, T: Terrain) {
   if (knows(w, "husbandry") && !has(w, "pen")) want.push("pen");
   if (knows(w, "well") && !has(w, "well")) want.push("well");
   if (knows(w, "mining") && w.found.includes("vein") && !has(w, "mine")) want.push("mine");
+  // 길을 막거나 계획에서 벗어난 건물은 알맞은 필지에 새로 짓고 옛 건물을 해체한다
+  if (!want.length && planMove(w, T)) return;
   // 집 업그레이드: 오래된 집을 허물고 더 높고 튼튼한 집을 짓는다
-  if (best && !want.length) {
+  if (best && !want.length && rebuilding(w) < 1) {
     const tierBest = STRUCTS[best].tier ?? 0;
     const old = houses(w)
       .filter((h) => (STRUCTS[h.type].tier ?? 0) < tierBest && !w.structures.some((s) => s.replaces === h.id))
       .sort((x, y) => (STRUCTS[x.type].tier ?? 0) - (STRUCTS[y.type].tier ?? 0))[0];
     if (old) {
-      const site = findSite(w, T, best, { x: old.x, z: old.z });
+      const g = old.group != null ? w.groups?.find((x) => x.id === old.group && x.camp) : undefined;
+      const site = findSite(w, T, best, g?.camp ?? undefined);
       if (site) {
-        newProject(w, best, site).replaces = old.id;
+        const p = newProject(w, best, site);
+        p.replaces = old.id;
+        if (g) p.group = g.id;
         return;
       }
     }
@@ -416,15 +424,22 @@ export function findSite(
 ): { x: number; z: number; rot: number } | null {
   const def = STRUCTS[type];
   if (type === "dock" || type === "lighthouse" || type === "seawall" || type === "shipyard") return coastSite(w, T, type);
+  // 마을 계획: 바둑판의 빈 필지 가운데 알맞은 곳 (무덤은 마을 밖 묘역)
+  if (!ring && !OFFGRID.has(type)) {
+    const site = type === "grave" ? graveSite(w, T) : lotSite(w, T, type, near);
+    if (site) {
+      claimSite(w, type, site);
+      return site;
+    }
+    if (type !== "grave") return null;
+  }
   const [r0, r1] = ring ? [ring.min, ring.max] : near ? [def.radius + 3, def.radius + 9] : RING[type] ?? [5, 15];
   const cx = near?.x ?? w.camp.x, cz = near?.z ?? w.camp.z;
-  const grid = layoutGrid(w, type);
   for (let k = 0; k < 160; k++) {
     const grow = 1 + Math.floor(k / 40) * 0.4;
     const a = rand(w) * Math.PI * 2;
     const d = range(w, r0, r1 * grow);
-    let x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
-    if (grid) [x, z] = grid.snap(x, z);
+    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
     if (!T.isLand(x, z)) continue;
     if (T.height(x, z) < 0.9) continue;
     if (T.slopeAt(x, z) > (type === "farm" ? 0.28 : type === "mine" ? 0.8 : 0.38)) continue;
@@ -446,36 +461,28 @@ export function findSite(
     for (const r of w.rocks) if (dist(x, z, r.x, r.z) < def.radius + 1) blocked = true;
     if (blocked) continue;
     clearSite(w, x, z, def.radius + 0.6);
-    const rot = grid ? grid.face(x, z) : Math.atan2(cz - z, cx - x);
-    return { x, z, rot };
+    return { x, z, rot: Math.atan2(cz - z, cx - x) };
   }
   return null;
 }
 
-/**
- * 수학을 알면 건물이 같은 방향을 바라보게 짓고, 건축학을 알면 마을을 바둑판처럼 반듯하게 나눈다.
- * 축은 야영지에서 바다를 바라보는 방향에 맞춘다.
- */
-function layoutGrid(w: WorldState, type: StructureType) {
-  if (!knows(w, "mathematics") || type === "farm" || type === "grave" || type === "campfire" || type === "mine") return null;
-  const base = Math.atan2(w.camp.z, w.camp.x);
-  const ux = Math.cos(base), uz = Math.sin(base);
-  const step = 3.6;
-  const squared = knows(w, "architecture");
-  return {
-    snap(x: number, z: number): [number, number] {
-      if (!squared) return [x, z];
-      const dx = x - w.camp.x, dz = z - w.camp.z;
-      const u = Math.round((dx * ux + dz * uz) / step) * step;
-      const v = Math.round((-dx * uz + dz * ux) / step) * step;
-      return [w.camp.x + u * ux - v * uz, w.camp.z + u * uz + v * ux];
-    },
-    /** 마을 가운데를 향하는 네 방향 가운데 하나 */
-    face(x: number, z: number) {
-      const a = Math.atan2(w.camp.z - z, w.camp.x - x) - base;
-      return base + Math.round(a / (Math.PI / 2)) * (Math.PI / 2);
-    },
-  };
+/** 필지에 터를 닦는다: 나무를 베고, 걸친 돌은 치워 창고에 쌓고, 큰 건물 터의 밭은 걷어 낸다 */
+function claimSite(w: WorldState, type: StructureType, site: { x: number; z: number }) {
+  const def = STRUCTS[type];
+  clearSite(w, site.x, site.z, type === "grave" ? 0.8 : def.radius + 0.6);
+  const before = w.rocks.length;
+  w.rocks = w.rocks.filter((r) => {
+    if (!MOVABLE_ROCK.has(r.kind) || dist(r.x, r.z, site.x, site.z) > def.radius + 1.2) return true;
+    addStock(w, "stone", Math.floor(r.amt * 0.5));
+    return false;
+  });
+  if (w.rocks.length !== before) bump(w);
+  for (const f of w.structures) {
+    if ((f.type === "farm" || f.type === "pen") && f.raze == null && dist(f.x, f.z, site.x, site.z) < def.radius + STRUCTS[f.type].radius) {
+      f.raze = 0;
+      chron(w, "build", `${josa(def.name, "을/를")} 지을 터를 닦으려고 그 자리의 ${josa(STRUCTS[f.type].name, "을/를")} 걷어 내기로 했다.`);
+    }
+  }
 }
 
 function clearSite(w: WorldState, x: number, z: number, r: number) {
@@ -516,10 +523,17 @@ export function completeStructure(w: WorldState, s: Structure, by: Person | null
   s.prog = 1;
   const def = STRUCTS[s.type];
   if (s.replaces != null) {
+    // 옮겨 지은 것: 옛 건물은 비워 두었다가 낮에 아무도 없을 때 해체한다
     const old = findById(w.structures, s.replaces);
     if (old) {
-      for (const p of w.people) if (p.home === old.id) p.home = s.id;
-      w.structures = w.structures.filter((x) => x.id !== old.id);
+      for (const p of w.people) if (p.home === old.id) p.home = isHouse(s.type) ? s.id : null;
+      old.raze = 0;
+      // 같은 쓰임의 건물을 찾으면 새 건물이 먼저 나오도록 자리를 바꾼다
+      const i = w.structures.indexOf(old), j = w.structures.indexOf(s);
+      if (i >= 0 && i < j) {
+        w.structures[i] = s;
+        w.structures[j] = old;
+      }
     }
     s.replaces = undefined;
   }
@@ -530,6 +544,166 @@ export function completeStructure(w: WorldState, s: Structure, by: Person | null
   if (isHouse(s.type)) assignHomes(w);
   if (s.type !== "grave" && s.type !== "farm") shiftMorale(w, STRUCTS[s.type].hp >= 300 ? 3 : 1);
   bump(w);
+}
+
+// ─── 마을 정리: 옮겨 짓기 · 해체 · 이장 ─────────────────────────────
+
+/** 옮겨 짓는 중인 공사 수 */
+export const rebuilding = (w: WorldState) => projects(w).filter((s) => s.replaces != null).length;
+
+const MOVE_WHY = {
+  block: (n: string) => `${josa(n, "이/가")} 길을 막고 있어 사람들이 빙 돌아다녔다`,
+  astray: (n: string) => `제멋대로 서 있던 ${josa(n, "이/가")} 바둑판처럼 반듯한 마을 길과 어긋나 있었다`,
+  far: (n: string) => `${josa(n, "이/가")} 마을 한가운데에서 멀어 오가기 불편했다`,
+  field: (n: string) => `마을이 커지면서 ${josa(n, "이/가")} 집들 사이에 갇혀 집 지을 자리를 차지하고 있었다`,
+};
+
+/**
+ * 길을 막거나, 마을 계획에서 벗어났거나, 너무 멀어 오가기 불편한 건물을 하나 골라 알맞은 필지에 새로 짓는다.
+ * 다 지으면 옛 건물은 비워 두었다가 낮에 아무도 없을 때 해체한다. 남아도는 집은 새로 짓지 않고 해체만 한다.
+ */
+function planMove(w: WorldState, T: Terrain) {
+  const pop = living(w).length;
+  if (rebuilding(w) >= (pop >= 30 ? 2 : 1)) return false;
+  if (w.time - (w.timers.move ?? -1e12) < 4 * HOUR || w.disaster) return false;
+  // 옮길 것이 없어도 네 시간에 한 번만 살핀다
+  w.timers.move = w.time;
+  const net = roadNet(w, T);
+  const busy = new Set(w.structures.map((s) => s.replaces).filter((x) => x != null));
+  const ok = (s: Structure) => s.prog >= 1 && s.raze == null && !OFFGRID.has(s.type) && s.type !== "grave" && !busy.has(s.id);
+  let chosen: { s: Structure; why: keyof typeof MOVE_WHY } | null = null;
+  for (const s of w.structures) {
+    if (!ok(s)) continue;
+    const why = net.blocked.has(s.id) ? "block" : !sited(w, s) ? "astray" : null;
+    if (!why) continue;
+    const d = dist(s.x, s.z, w.camp.x, w.camp.z);
+    if (!chosen || (why === "block" && chosen.why !== "block") || (why === chosen.why && d < dist(chosen.s.x, chosen.s.z, w.camp.x, w.camp.z))) chosen = { s, why };
+  }
+  let site: { x: number; z: number; rot: number } | null = null;
+  if (!chosen) {
+    // 집들 사이에 갇힌 밭은 마을 바깥으로
+    const f = engulfed(w);
+    if (f && ok(f)) chosen = { s: f, why: "field" };
+  }
+  if (!chosen) {
+    // 오래된 건물 가운데 훨씬 가까운 빈 필지가 생긴 것 (밭·망루는 일부러 바깥에 둔다)
+    const old = w.structures.filter((s) => ok(s) && s.group == null && w.time - s.t > 20 * DAY
+      && !["farm", "pen", "windmill", "watchtower", "fort", "battery", "infirmary", "observatory"].includes(s.type));
+    const m = misplaced(w, T, old);
+    if (!m) return false;
+    chosen = { s: m.s, why: "far" };
+    site = m.site;
+    claimSite(w, m.s.type, site);
+  }
+  const s = chosen.s;
+  const name = STRUCTS[s.type].name;
+  w.timers.move = w.time;
+  // 남아도는 집은 해체만 한다
+  if (isHouse(s.type) && houseCapacity(w) - (STRUCTS[s.type].cap ?? 0) >= pop + 2) {
+    s.raze = 0;
+    for (const p of w.people) if (p.home === s.id) p.home = null;
+    assignHomes(w);
+    moveLog(w, `${MOVE_WHY[chosen.why](name)}. 집이 넉넉하니 비워 두었다가 낮에 해체하기로 했다.`);
+    bump(w);
+    return true;
+  }
+  const type = isHouse(s.type) ? bestHouse(w) ?? s.type : s.type;
+  const g = s.group != null ? w.groups?.find((x) => x.id === s.group && x.camp) : undefined;
+  site ??= findSite(w, T, type, g?.camp ?? undefined);
+  if (!site) return false;
+  const p = newProject(w, type, site);
+  p.replaces = s.id;
+  if (s.group != null) p.group = s.group;
+  if (s.faith != null) p.faith = s.faith;
+  const how = type === s.type ? "더 알맞은 필지에 새로 짓고" : `${josa(STRUCTS[type].name, "으로/로")} 새로 지어 옮기고`;
+  moveLog(w, `${MOVE_WHY[chosen.why](name)}. ${how}, 다 지으면 옛 건물은 낮에 비워 두고 해체하기로 했다.`);
+  if (chosen.why === "block") {
+    const near = living(w).filter((q) => !q.away && dist(q.x, q.z, s.x, s.z) < 20);
+    if (near.length) say(w, pick(w, near)!, "detour", { what: name }, "😮‍💨", true);
+  }
+  return true;
+}
+
+/** 옮겨 짓기 이야기는 이틀에 한 번만 남긴다 (예전 마을을 정리할 때 연대기가 넘치지 않게) */
+function moveLog(w: WorldState, text: string) {
+  if (w.time - (w.timers.moveLog ?? -1e12) < 2 * DAY) return;
+  w.timers.moveLog = w.time;
+  chron(w, "build", text);
+}
+
+/** 해체는 낮에만 한다 */
+export const razeHours = (w: WorldState) => {
+  const h = hourOf(w.time);
+  return h >= 7 && h < 18;
+};
+
+/** 건물 안이나 곁에 사람이 있는지 (해체하는 사람은 빼고) */
+export function occupied(w: WorldState, s: Structure) {
+  const r = STRUCTS[s.type].radius + 0.4;
+  for (const p of w.people) {
+    if (!p.alive || p.away || p.act?.k === "raze") continue;
+    if (dist(p.x, p.z, s.x, s.z) < r) return true;
+    if (p.act?.tid === s.id) return true;
+    if (p.act && dist(p.act.tx, p.act.tz, s.x, s.z) < r - 0.3) return true;
+  }
+  return false;
+}
+
+/** 지금 해체할 수 있는 옛 건물 */
+export function razeTarget(w: WorldState) {
+  if (!razeHours(w)) return null;
+  for (const s of w.structures) {
+    if (s.raze == null || occupied(w, s)) continue;
+    if (w.people.filter((p) => p.act?.k === "raze" && p.act.tid === s.id).length >= 3) continue;
+    return s;
+  }
+  return null;
+}
+
+/** 해체를 마쳤다: 쓸 만한 재료의 절반을 창고로 돌린다 */
+export function demolish(w: WorldState, s: Structure, by: Person | null) {
+  for (const [r, n] of Object.entries(STRUCTS[s.type].cost) as [Res, number][]) {
+    const back = Math.floor(n * 0.5);
+    if (back > 0) addStock(w, r, back);
+  }
+  if (s.type === "farm") w.plants = w.plants.filter((p) => !(p.kind === "crop" && p.farm === s.id));
+  w.structures = w.structures.filter((x) => x !== s);
+  for (const p of w.people) if (p.home === s.id) p.home = null;
+  for (const x of w.structures) if (x.replaces === s.id) x.replaces = undefined;
+  addFx(w, "dust", s.x, s.z, s.id, 1);
+  if (isHouse(s.type)) assignHomes(w);
+  if (s.type !== "bench" && s.type !== "rack" && s.type !== "farm" && w.time - (w.timers.razeLog ?? -1e12) > DAY) {
+    w.timers.razeLog = w.time;
+    chron(w, "build", `${by ? josa(by.name, "이/가") + " " : ""}비워 둔 옛 ${josa(STRUCTS[s.type].name, "을/를")} 해체했다. 쓸 만한 재료는 창고로 옮겼다.`);
+  }
+  bump(w);
+}
+
+/** 매시간: 낮에는 흩어진 옛 무덤을 묘역으로 이장하고, 길에 자란 나무를 벤다 */
+export function hourlyTown(w: WorldState, T: Terrain) {
+  if (!razeHours(w)) return;
+  let moved = 0;
+  for (const g of w.structures) {
+    if (moved >= 3) break;
+    if (g.type !== "grave" || g.prog < 1 || sited(w, g)) continue;
+    const site = graveSite(w, T);
+    if (!site) break;
+    claimSite(w, "grave", site);
+    g.x = site.x;
+    g.z = site.z;
+    g.rot = site.rot;
+    addFx(w, "dust", g.x, g.z, g.id, 0.4);
+    moved++;
+    bump(w);
+  }
+  if (moved && !w.structures.some((g) => g.type === "grave" && !sited(w, g))) {
+    chron(w, "build", "여기저기 흩어져 있던 옛 무덤들을 마을 밖 묘역으로 옮겨 가지런히 모셨다.");
+  }
+  if (Math.floor(hourOf(w.time)) === 10 && roadNet(w, T).segs.length) {
+    const before = w.plants.length;
+    w.plants = w.plants.filter((p) => p.kind === "crop" || !onRoad(w, p.x, p.z));
+    if (w.plants.length !== before) bump(w);
+  }
 }
 
 export function campFire(w: WorldState) {

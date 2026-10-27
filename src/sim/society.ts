@@ -6,6 +6,7 @@ import { clamp } from "./noise";
 import { feel, say } from "./people";
 import { chance, pick, range } from "./rng";
 import { currentEra, findSite, foodTotal, projects } from "./settlement";
+import { townReach } from "./town";
 import type { Terrain } from "./terrain";
 import { josa } from "./text";
 import type { Group, GroupKind, Person, Role, WorldState } from "./types";
@@ -502,7 +503,8 @@ function rivalry(w: WorldState, T: Terrain) {
     const weak = power(a) < power(b) ? a : b;
     const strong = weak === a ? b : a;
     if ((t > 0.8 || chance(w, 0.4)) && !weak.camp && weak.kind !== "nation") {
-      const site = findSite(w, T, "leanto", undefined, { min: 22, max: 34 });
+      const reach = townReach(w);
+      const site = findSite(w, T, "leanto", undefined, { min: reach + 8, max: reach + 22 });
       if (site) {
         weak.camp = { x: site.x, z: site.z };
         w.structures.push(makeStructure(w, "campfire", site.x, site.z, 0, true));

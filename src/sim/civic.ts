@@ -12,6 +12,7 @@ import { josa } from "./text";
 import type { Civic, CivicKind, WorldState } from "./types";
 import { addStock, bump, chron, dist, findById, living } from "./world";
 import { HOUSE_TYPES } from "./data";
+import { onRoad } from "./town";
 
 export const TAX_RATE = 0.1;
 export const CIVIC_NAME: Record<CivicKind, string> = { road: "길", transport: "탈것", medical: "의료", welfare: "복지", trade: "무역" };
@@ -54,8 +55,9 @@ export function addFund(w: WorldState, n: number) {
   if (nation(w)) civicOf(w).fund += n;
 }
 
-/** 길이 좋아지고 탈것이 생기면 빨리 다닌다 */
-export const roadMul = (w: WorldState) => 1 + 0.06 * lvOf(w, "road") + 0.03 * lvOf(w, "transport");
+/** 길 위에서는 빨리 다닌다: 밟아 다진 오솔길도 조금, 나라가 닦은 길일수록 더. 탈것이 생기면 어디서든 조금 더 */
+export const roadMul = (w: WorldState, x: number, z: number) =>
+  (onRoad(w, x, z) ? 1.05 + 0.07 * lvOf(w, "road") : 1) + 0.03 * lvOf(w, "transport");
 /** 탈것이 있으면 한 번에 더 많이 나른다 */
 export const rideMul = (w: WorldState) => 1 + 0.2 * lvOf(w, "transport");
 /** 의료가 넓어지면 병과 상처가 빨리 낫는다 */
@@ -146,7 +148,7 @@ function improve(w: WorldState, k: CivicKind, cost: number, poor: number) {
   let done = "";
   switch (k) {
     case "road":
-      done = lv === 1 ? "마을과 집들 사이에 흙길을 다졌다" : `길을 넓혀 ${ROAD_NAME[lv]}로 고쳤다`;
+      done = lv === 1 ? "마을의 길을 흙길로 다지고, 큰길을 섬을 한 바퀴 두르는 둘레길까지 이었다" : `길을 넓혀 ${ROAD_NAME[lv]}로 고쳤다`;
       break;
     case "transport":
       done = `${RIDE_NAME[lv]}${josa(RIDE_NAME[lv], "을/를").slice(RIDE_NAME[lv].length)} 들여 짐을 실어 나르게 했다`;
@@ -198,12 +200,3 @@ export function civicInfo(w: WorldState) {
   };
 }
 
-/** 길을 그릴 때: 마을에서 이어지는 건물들 */
-export function roadLinks(w: WorldState): { lv: number; to: { x: number; z: number }[] } {
-  const lv = lvOf(w, "road");
-  if (!lv) return { lv: 0, to: [] };
-  const to = w.structures
-    .filter((s) => s.prog >= 1 && s.type !== "raft" && s.type !== "grave" && s.type !== "banner" && s.type !== "campfire" && dist(s.x, s.z, w.camp.x, w.camp.z) < 60)
-    .map((s) => ({ x: s.x, z: s.z }));
-  return { lv, to };
-}

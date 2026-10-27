@@ -144,8 +144,10 @@ export interface Structure {
   name?: string;
   /** 플레이어가 만든 불 */
   byPlayer?: number;
-  /** 업그레이드 대상(완공 시 교체) */
+  /** 옮겨 짓거나 업그레이드하는 대상 (완공하면 그 건물을 비우고 해체한다) */
   replaces?: number;
+  /** 있으면 해체할 옛 건물이고, 값은 해체한 정도 0..1 (낮에 아무도 없을 때만 허문다) */
+  raze?: number;
   t: number;
   /** 재해로 부서진 정도 0..1 (0.6 이상이면 쓸 수 없음) */
   dmg?: number;
@@ -177,6 +179,8 @@ export type ActKind =
   | "shelter" | "warm" | "mourn" | "care" | "collect" | "react" | "unconscious" | "explore"
   | "tame" | "play" | "follow"
   | "rest" | "isolate" | "nurse" | "medicate" | "dig" | "council" | "repair" | "evacuate" | "fight" | "board"
+  /** 옮겨 지은 뒤 비워 둔 옛 건물 허물기 */
+  | "raze"
   | "defend" | "hide" | "design"
   /** 불 끄기 · 불길에서 달아나기 */
   | "douse" | "flee"
@@ -585,6 +589,8 @@ export interface WorldState {
     beastKills?: number; beastCap?: number;
     /** 도박 이야기를 마지막으로 남긴 시각 */
     casinoLog?: number;
+    /** 마지막으로 건물을 옮겨 짓기로 한 시각, 그 이야기와 해체 이야기를 남긴 시각 */
+    move?: number; moveLog?: number; razeLog?: number;
   };
   fx: Fx[];
   // ─── v2 ───
