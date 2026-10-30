@@ -105,6 +105,7 @@ function setLevel(w: WorldState, p: Person, lv: number) {
 
 /** 매 스텝: 걸리고, 앓고, 나아지고, 나빠진다 */
 export function updateIllness(w: WorldState, ctx: Ctx, p: Person, dt: number) {
+  if (p.robot) return;
   const lv = illOf(p);
   if (!lv) {
     if (w.time < (p.immune ?? 0)) return;

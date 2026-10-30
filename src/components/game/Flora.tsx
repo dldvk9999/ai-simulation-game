@@ -347,7 +347,9 @@ function GrassDecor({ terrain }: { terrain: Terrain }) {
     }
     tintFor("bush", env.season, env.seasonT, [mat.uniforms.uTint.value, mat.uniforms.uTint2.value]);
     mat.uniforms.uSnow.value = env.snowCover;
-    if (flowerRef.current) flowerRef.current.visible = env.season !== 3 && env.snowCover < 0.4;
+    if (flowerRef.current) flowerRef.current.visible = env.season !== 3 && env.snowCover < 0.4 && env.scar < 0.3;
+    // 핵전쟁에 그을린 땅에는 풀이 다시 돋을 때까지 아무것도 없다
+    if (grassRef.current) grassRef.current.visible = env.scar < 0.45;
   });
 
   return (

@@ -67,6 +67,11 @@ const SPECS: Partial<Record<FxType | "click" | "smoke" | "ripple" | "blaze" | "e
   shot: { n: 10, colors: ["#fff3b0", "#ffd166", "#d9d9d9"], speed: 2.0, up: 1.4, life: 0.5, size: 0.22, g: 1 },
   bite: { n: 9, colors: ["#e5484d", "#ffb3b3", "#ffffff"], speed: 1.8, up: 1.6, life: 0.6, size: 0.2, g: 5 },
   crack: { n: 14, colors: ["#8c6a48", "#a8a39a", "#cbbca5"], speed: 2.0, up: 2.4, life: 1.0, size: 0.24, g: 7, spread: 0.8 },
+  board: { n: 16, colors: ["#e7f5ff", "#a5d8ff", "#ffffff"], speed: 0.8, up: 3.2, life: 1.4, size: 0.24, g: -0.6, spread: 0.4 },
+  bless: { n: 26, colors: ["#fff3bf", "#ffe066", "#ffffff", "#ffd43b"], speed: 0.7, up: 2.6, life: 2.4, size: 0.26, g: -0.8, spread: 0.5 },
+  robot: { n: 24, colors: ["#74c0fc", "#d0ebff", "#ffffff", "#4dabf7"], speed: 2.4, up: 3, life: 1.0, size: 0.2, g: 6, spread: 0.4 },
+  firework: { n: 60, colors: ["#ff6b6b", "#ffd43b", "#69db7c", "#74c0fc", "#f783ac", "#ffffff"], speed: 7, up: 2, life: 1.8, size: 0.32, g: 2.2, spread: 0.1 },
+  blast: { n: 140, colors: ["#fff3bf", "#ffd43b", "#ff922b", "#e8590c", "#6b6560"], speed: 16, up: 12, life: 3.2, size: 1.1, g: 3, spread: 3, grow: 1.2 },
 };
 
 export function Effects({ terrain }: { terrain: Terrain }) {
@@ -179,6 +184,16 @@ export function Effects({ terrain }: { terrain: Terrain }) {
         amb?.pop(700, 0.05);
       }
       if (f.type === "dice") y = ground + 1.1;
+      if (f.type === "firework") {
+        y = ground + 18 + Math.random() * 8;
+        amb?.pop(700 + Math.random() * 500, 0.05);
+      }
+      if (f.type === "robot" || f.type === "bless" || f.type === "board") {
+        const p = w.people.find((q) => q.id === f.ref);
+        y = terrain.height(p?.x ?? f.x, p?.z ?? f.z) + 1.1;
+        amb?.chime();
+      }
+      if (f.type === "blast") amb?.pop(40, 0.5);
       if (f.type === "breath") {
         // 용의 머리에서 목표로
         const b = w.beasts.find((q) => q.id === f.ref);

@@ -11,6 +11,7 @@ import { believers, faithLabel, FAITH } from "@/sim/religion";
 import { CURRENCY, money, walletLabel } from "@/sim/economy";
 import { addicted, casinoInfo, gambleLabel } from "@/sim/casino";
 import { civicInfo } from "@/sim/civic";
+import { creditsOf, endingCaption, endingIcon, endingTitle, phaseLen, type Credits } from "@/sim/ending";
 import { GOV_NAME, ministerTitle, moodName, nationOf } from "@/sim/nation";
 import { DISASTER_ICON, DISASTER_NAME } from "@/sim/disaster";
 import { ILL_NAME } from "@/sim/disease";
@@ -65,6 +66,8 @@ interface Dyn {
   vs?: WorldState["visit"];
   /** 불길 [id, x, z, 반경, 세기, 타는 건물, 그 건물이 부서진 정도, 커질 수 있는 끝] */
   bz?: [number, number, number, number, number, number | 0, number, number][];
+  /** 지금 배속 */
+  sp?: number;
 }
 
 const NEED_KEYS = ["hunger", "thirst", "energy", "warmth", "social", "fun"] as const;
@@ -85,7 +88,7 @@ const WEATHER_LIKE: Record<string, string> = { clear: "맑은 날", rain: "비 �
 const SKILL_LABEL: Record<string, string> = {
   gather: "채집", hunt: "사냥", fish: "낚시", build: "건축", craft: "손재주", think: "사색", farm: "농사", cook: "요리", fire: "불 다루기",
 };
-const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family", "faith", "trade", "nation", "casino", "civic"]);
+const TOAST_KINDS = new Set(["discover", "era", "birth", "death", "arrive", "couple", "build", "gift", "disease", "disaster", "society", "voyage", "beast", "fire", "family", "faith", "trade", "nation", "casino", "civic", "ending"]);
 const BEAST_ICON: Record<BeastKind, string> = { wolf: "🐺", bear: "🐻", tiger: "🐯", sabertooth: "🐅", dragon: "🐉" };
 
 /** 이전 버전 저장본도 읽을 수 있게 빠진 필드를 채운다 */
@@ -93,6 +96,7 @@ export function normalizeWorld(raw: WorldState): WorldState {
   const w = raw;
   w.fx = [];
   for (const a of w.animals) a.held = null;
+  for (const p of w.people) p.bubble ??= null;
   for (const f of w.fish) f.held = null;
   for (const it of w.items) it.held = null;
   w.timers ??= { castaway: 0, fish: 0, day: dayOf(w.time), strike: 0, animals: 0 };
@@ -157,6 +161,12 @@ export class GameRuntime {
   private join: JoinResponse;
   private joinPerf: number;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 배속: 관찰자마다 누르고 있는 배속 (호스트는 그중 가장 큰 값을 따른다) */
+  private speedReq = new Map<string, { mul: number; until: number }>();
+  private holdTimer: ReturnType<typeof setInterval> | null = null;
+  /** 크레딧: 이번 엔딩에서 저절로 띄웠는지, 만들어 둔 내용 */
+  private creditsFor = -1;
+  private creditsCache: { key: string; c: Credits | null } = { key: "", c: null };
 
   constructor(join: JoinResponse) {
     this.join = join;
@@ -274,7 +284,9 @@ export class GameRuntime {
     const now = performance.now();
     const dtReal = Math.min(now - this.lastReal, 10 * 60 * 1000) / 1000;
     this.lastReal = now;
-    let dt = dtReal * TIME_SCALE;
+    const mul = this.speedNow();
+    w.spd = mul;
+    let dt = dtReal * TIME_SCALE * mul;
     while (dt > 0) {
       const d = Math.min(dt, 36);
       step(w, d);
@@ -304,7 +316,7 @@ export class GameRuntime {
     if (!w) return;
     this.lastFullRev = w.rev;
     this.lastFullAt = performance.now();
-    const snapshot = { ...w, fx: [] };
+    const snapshot = { ...w, fx: [], spd: undefined };
     this.transport.send("full", await pack(snapshot), to);
   }
 
@@ -345,6 +357,7 @@ export class GameRuntime {
       mo: Math.round(w.morale),
       vs: w.visit,
       bz: w.blazes.map((b) => [b.id, r1(b.x), r1(b.z), r1(b.r), r1(b.heat), b.sid ?? 0, b.sid != null ? r1(findById(w.structures, b.sid)?.dmg ?? 0) : 0, r1(b.max)]),
+      sp: w.spd ?? 1,
     };
   }
 
@@ -398,6 +411,7 @@ export class GameRuntime {
       if (fly != null) b.fly = fly;
     }
     if (d.mo != null) w.morale = d.mo;
+    w.spd = d.sp ?? 1;
     if (d.vs !== undefined) w.visit = d.vs;
     if (d.bz) {
       w.blazes = d.bz.map(([id, x, z, r, heat, sid, , max]) => ({ id, x, z, r, max: max ?? r, heat, sid: sid || undefined, fuel: 0, t: 0, why: "spread", by: [] }));
@@ -436,6 +450,8 @@ export class GameRuntime {
         void unpack<WorldState>(m.d as { z?: string; j?: string }).then((w) => {
           if (this.isHost || this.disposed) return;
           const first = !this.world;
+          // 누군가 새로 시작했다
+          if (this.world && (w.stats.cycle ?? 1) !== (this.world.stats.cycle ?? 1)) this.forgetSelection();
           this.world = normalizeWorld(w);
           this.terrain = getTerrain(w.seed);
           if (first) this.lastChron = chronCount(w);
@@ -445,6 +461,12 @@ export class GameRuntime {
         break;
       case "dyn":
         if (!this.isHost) this.applyDyn(m.d as Dyn);
+        break;
+      case "speed":
+        if (this.isHost) this.requestSpeed(m.from, Number((m.d as { mul?: number })?.mul) || 1);
+        break;
+      case "restart":
+        if (this.isHost && this.world?.ending?.done != null) this.resetWorld();
         break;
       case "act":
         if (this.isHost && this.world) {
@@ -521,12 +543,119 @@ export class GameRuntime {
     }
   }
 
+  // ─── 배속 ───────────────────────────────────────────────────────────
+
+  /** 배속 버튼을 누르고 있는 동안 (1이면 손을 뗐다). 누르는 동안 1초마다 다시 알린다 */
+  holdSpeed(mul: number) {
+    if (this.holdTimer) clearInterval(this.holdTimer);
+    this.holdTimer = null;
+    this.requestSpeed(this.viewerId, mul);
+    if (mul > 1) this.holdTimer = setInterval(() => this.requestSpeed(this.viewerId, mul), 1000);
+  }
+
+  private requestSpeed(from: string, mul: number) {
+    if (!this.isHost) {
+      if (from === this.viewerId) this.transport.send("speed", { mul });
+      return;
+    }
+    if (mul > 1) this.speedReq.set(from, { mul: Math.min(3, mul), until: performance.now() + 2500 });
+    else this.speedReq.delete(from);
+  }
+
+  /** 알림이 끊긴 지 오래면 (손을 떼는 신호를 놓쳤어도) 원래 빠르기로 */
+  private speedNow() {
+    const now = performance.now();
+    let m = 1;
+    for (const [id, r] of this.speedReq) {
+      if (r.until < now) this.speedReq.delete(id);
+      else m = Math.max(m, r.mul);
+    }
+    return m;
+  }
+
+  // ─── 엔딩 ───────────────────────────────────────────────────────────
+
+  /** 엔딩을 본 뒤 새로 시작하기: 같은 섬에서 표류자 한 명부터 다시 */
+  restart() {
+    if (this.world?.ending?.done == null) return;
+    if (this.isHost) this.resetWorld();
+    else this.transport.send("restart");
+  }
+
+  private resetWorld() {
+    const old = this.world!;
+    const cycle = (old.stats.cycle ?? 1) + 1;
+    const w = createWorld(seedOf(this.worldId), Date.now(), cycle * 7919 + (Date.now() % 65536));
+    // 저장은 시간이 거꾸로 가면 받지 않으니, 지난 문명의 시간을 이어 센다
+    w.base = (old.base ?? 0) + old.time;
+    w.stats.cycle = cycle;
+    this.world = w;
+    this.lastChron = 0;
+    this.forgetSelection();
+    this.bumpVersion();
+    void this.sendFull();
+    void this.save();
+  }
+
+  private forgetSelection() {
+    useHud.setState({ selectedId: null, followId: null, structId: null, openGroup: null, away: null, creditsOpen: false, confirmRestart: false });
+  }
+
+  private creditsKey(t0: number) {
+    return `island:credits:${this.worldId}:${this.world?.stats.cycle ?? 1}:${Math.round(t0)}`;
+  }
+
+  /** 크레딧을 닫고 이 섬을 계속 지켜본다 */
+  closeCredits() {
+    const e = this.world?.ending;
+    if (e) {
+      try {
+        localStorage.setItem(this.creditsKey(e.t0), "1");
+      } catch {}
+    }
+    useHud.setState({ creditsOpen: false });
+  }
+
+  private creditsOf(w: WorldState) {
+    const e = w.ending;
+    const key = e?.done != null ? `${e.t0}:${w.annals?.length ?? 0}` : "";
+    if (this.creditsCache.key !== key) this.creditsCache = { key, c: key ? creditsOf(w) : null };
+    return this.creditsCache.c;
+  }
+
+  private endingHud(w: WorldState) {
+    const e = w.ending;
+    if (!e) return null;
+    if (e.done != null && this.creditsFor !== e.t0) {
+      // 처음 맞은 엔딩이면 크레딧을 저절로 띄운다 (이 브라우저에서 이미 봤으면 그대로)
+      this.creditsFor = e.t0;
+      let seen = false;
+      try {
+        seen = localStorage.getItem(this.creditsKey(e.t0)) === "1";
+      } catch {}
+      if (!seen) useHud.setState({ creditsOpen: true });
+    }
+    const len = phaseLen(e);
+    // 외계 침공은 싸움이 끝나기 전에 결말을 드러내지 않는다
+    const veiled = e.kind === "alien" && e.done == null && e.ph < 2;
+    return {
+      kind: e.kind,
+      icon: veiled ? "👽" : endingIcon(e),
+      title: veiled ? "차원문 너머의 침공" : endingTitle(e),
+      caption: endingCaption(e),
+      ph: e.ph,
+      prog: e.done != null || !len ? 1 : Math.min(1, (w.time - e.ts[e.ph]) / len),
+      done: e.done != null,
+      key: e.t0,
+    };
+  }
+
   // ─── 저장 / 하트비트 ─────────────────────────────────────────────────
 
   async save(keepalive = false) {
     const w = this.world;
     if (!w || !this.isHost) return;
-    const body = JSON.stringify({ worldId: this.worldId, viewerId: this.viewerId, state: { ...w, fx: [] }, simTime: w.time }, compact);
+    const body = JSON.stringify({ worldId: this.worldId, viewerId: this.viewerId, state: { ...w, fx: [], spd: undefined }, simTime: (w.base ?? 0) + w.time }, compact);
     try {
       const gz = await gzipBytes(body);
       const payload = gz ?? body;
@@ -593,6 +722,7 @@ export class GameRuntime {
     this.flush();
     this.disposed = true;
     if (this.simTimer) clearInterval(this.simTimer);
+    if (this.holdTimer) clearInterval(this.holdTimer);
     for (const t of this.timers) clearInterval(t);
     if (this.syncTimer) clearTimeout(this.syncTimer);
     this.transport.close();
@@ -614,7 +744,7 @@ export class GameRuntime {
       name: p.name,
       age: Math.floor(ageYears(p.birth, t)),
       sex: p.sex,
-      emoji: !p.alive ? "🕯️" : p.away ? (p.away.via === "ship" ? "⛵" : "🌀") : (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : p.wound?.sev === 2 ? "🩹" : p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌",
+      emoji: !p.alive ? "🕯️" : p.robot ? "🤖" : p.away ? (p.away.via === "ship" ? "⛵" : "🌀") : (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : p.wound?.sev === 2 ? "🩹" : p.act?.k === "sleep" ? "💤" : EMOJI[dominant(p)[0]] ?? "😌",
       action: !p.alive ? "영원히 잠듦" : p.away ? (p.away.via === "ship" ? "바다 건너 항해 중" : "차원문 너머 여행 중") : actLabel(p.act),
       alive: !!p.alive,
       group: p.group ?? null,
@@ -658,8 +788,12 @@ export class GameRuntime {
       weather: w.weather.type,
       temp: Math.round(w.weather.temp),
       era: ERAS[currentEra(w)],
-      pop: w.people.filter((p) => p.alive && !p.away).length,
+      pop: w.people.filter((p) => p.alive && !p.away && !p.robot).length,
       abroad: w.people.filter((p) => p.alive && p.away).length,
+      robots: w.people.filter((p) => p.alive && p.robot).length,
+      speed: w.spd ?? 1,
+      ending: this.endingHud(w),
+      credits: this.creditsOf(w),
       groups,
       disaster: D && t >= D.start - (D.warned ? 6 * 3600 : 0) && t <= D.until
         ? { name: DISASTER_NAME[D.type], icon: DISASTER_ICON[D.type], coming: t < D.start }
@@ -791,7 +925,7 @@ export class GameRuntime {
       name: p.name,
       age: Math.floor(ageYears(p.birth, w.time)),
       sex: p.sex,
-      emoji: (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : EMOJI[emo] ?? "😌",
+      emoji: p.robot ? "🤖" : (p.ill ?? 0) >= 3 ? "🤒" : addicted(w, p) ? "🎰" : EMOJI[emo] ?? "😌",
       action: p.alive ? actLabel(p.act) : "영원히 잠듦",
       alive: !!p.alive,
       needs: { ...p.needs },
@@ -809,7 +943,7 @@ export class GameRuntime {
       home: home ? STRUCTS[home.type].name + (home.lv && home.lv > 1 ? ` ${home.lv}층` : "") + ((home.dmg ?? 0) > 0 ? " (부서짐)" : "") : "집 없음",
       preg: !!p.preg,
       group: p.group ?? null,
-      role: p.role ? `${ROLE_ICON[p.role]} ${p.role === "minister" ? ministerTitle(w, p) || ROLE_NAME[p.role] : ROLE_NAME[p.role]}` : kidIcon(ageYears(p.birth, w.time)) && `${kidIcon(ageYears(p.birth, w.time))} ${stageName(ageYears(p.birth, w.time))}`,
+      role: [p.robot ? "🤖 로봇" : "", p.role ? `${ROLE_ICON[p.role]} ${p.role === "minister" ? ministerTitle(w, p) || ROLE_NAME[p.role] : ROLE_NAME[p.role]}` : kidIcon(ageYears(p.birth, w.time)) && `${kidIcon(ageYears(p.birth, w.time))} ${stageName(ageYears(p.birth, w.time))}`].filter(Boolean).join(" · "),
       ill: p.ill ?? 0,
       illName: p.ill ? (p.flu && p.ill === 2 ? "독감 기운" : ILL_NAME[p.ill]) : "",
       away: !!p.away,

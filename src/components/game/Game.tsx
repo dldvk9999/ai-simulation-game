@@ -5,10 +5,13 @@ import * as THREE from "three";
 import { Ambience } from "@/game/audio";
 import { useHud } from "@/game/hud";
 import { GameRuntime, type JoinResponse } from "@/game/runtime";
+import { beginEnding } from "@/sim/ending";
+import { step } from "@/sim/step";
 import { Hud } from "@/components/hud/Hud";
 import { AudioContext3D, LabelContext, RuntimeContext, useRuntime, useWorldVersion } from "./context";
 import { camState, Controls } from "./Controls";
 import { Effects } from "./Effects";
+import { EndingFx } from "./Ending";
 import { Flora } from "./Flora";
 import { People } from "./People";
 import { SkyAndLight } from "./SkyAndLight";
@@ -40,6 +43,7 @@ function Scene() {
       <People terrain={terrain} />
       <WeatherFx terrain={terrain} />
       <Effects terrain={terrain} />
+      <EndingFx terrain={terrain} />
       <Controls terrain={terrain} />
     </>
   );
@@ -58,7 +62,8 @@ export default function Game({ join, onExit }: { join: JoinResponse; onExit: () 
     camState.ready = false;
     const r = new GameRuntime(join);
     setRt(r);
-    if (process.env.NODE_ENV !== "production") (window as unknown as { __island: unknown }).__island = { rt: r, camState, hud: useHud };
+    // 개발용: 콘솔에서 장면을 꾸며 볼 수 있게 (도움말 그림 · 엔딩 확인)
+    if (process.env.NODE_ENV !== "production") (window as unknown as { __island: unknown }).__island = { rt: r, camState, hud: useHud, sim: { beginEnding, step } };
     void r.start();
     let muted = false;
     try {

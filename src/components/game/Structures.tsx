@@ -716,7 +716,8 @@ export function Structures({ terrain }: { terrain: Terrain }) {
     // 짓는 중이거나 불타는 건물이 있으면 모양(기울기·그을음)을 자주 고친다
     if (rt.world?.structures.some((s) => s.prog < 1 || (s.raze ?? 0) > 0) || rt.world?.blazes.length) setTick((t) => t + 1);
   });
-  const list = useMemo(() => (rt.world ? rt.world.structures.map((s) => ({ ...s, burnt: rt.world!.blazes.some((b) => b.sid === s.id) })) : []),
+  // 불타는 건물과 핵전쟁에 무너진 건물은 검게 그을린다
+  const list = useMemo(() => (rt.world ? rt.world.structures.map((s) => ({ ...s, burnt: rt.world!.blazes.some((b) => b.sid === s.id) || ((rt.world!.scar ?? 0) > 0.25 && (s.dmg ?? 0) >= 0.6) })) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [version, tick]);
 

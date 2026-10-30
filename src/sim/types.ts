@@ -189,7 +189,9 @@ export type ActKind =
   /** 제단에서 올리는 의식 · 물건 바꾸기 · 나라를 지키러 바닷가에 모이기 */
   | "rite" | "trade" | "muster"
   /** 도박장에서 한 판 · 게임중독으로 집에 틀어박힘 · 대신이 중독될 만한 사람을 타이름 */
-  | "gamble" | "addict" | "counsel";
+  | "gamble" | "addict" | "counsel"
+  /** 엔딩을 맞는 동안 모두가 함께 움직인다 (sub: 무엇을 하는지) */
+  | "scene";
 
 export type Anim =
   | "idle" | "walk" | "run" | "chop" | "pick" | "sit" | "sleep" | "eat" | "think" | "knap"
@@ -280,6 +282,8 @@ export interface Person {
   wound?: Wound | null;
   /** 도박장에서의 기록과 게임중독 */
   gamble?: Gamble;
+  /** 몸을 기계로 바꾼 로봇 (사람 수에 넣지 않는다) */
+  robot?: number;
 }
 
 /** 상처: 1 가벼운 상처 · 2 큰 상처. 나을 때까지 절뚝이고 일이 더디다 */
@@ -531,7 +535,7 @@ export interface Beast {
 export type ChronicleKind =
   | "arrive" | "discover" | "build" | "birth" | "death" | "couple" | "weather" | "gift" | "era" | "misc" | "season"
   | "disease" | "disaster" | "society" | "voyage" | "beast" | "fire" | "family" | "faith" | "trade" | "nation"
-  | "casino" | "civic";
+  | "casino" | "civic" | "ending";
 
 export interface ChronicleEntry {
   t: number;
@@ -544,7 +548,9 @@ export type FxType =
   | "drop" | "stun" | "complete" | "birth" | "arrive" | "catch" | "chop"
   | "dust" | "heal" | "clash" | "portal" | "collapse"
   | "roar" | "shot" | "bite" | "crack" | "douse" | "cry" | "coin" | "pray"
-  | "breath" | "dice";
+  | "breath" | "dice"
+  /** 엔딩: 핵폭발 · 탑승 · 영생의 빛 · 로봇으로 바뀜 · 불꽃놀이 */
+  | "blast" | "board" | "bless" | "robot" | "firework";
 
 export interface Fx {
   id: number;
@@ -577,7 +583,7 @@ export interface WorldState {
   camp: { x: number; z: number };
   chronicle: ChronicleEntry[];
   /** chron: 지금까지 쓰인 연대기 항목 수 (오래된 항목은 지워져도 계속 센다) */
-  stats: { births: number; deaths: number; arrivals: number; maxPop: number; generation: number; created: number; chron?: number };
+  stats: { births: number; deaths: number; arrivals: number; maxPop: number; generation: number; created: number; chron?: number; cycle?: number };
   timers: {
     castaway: number; fish: number; day: number; strike: number; animals: number; stormLog?: number; snowLog?: number;
     disaster?: number; voyage?: number; council?: number;
@@ -591,6 +597,8 @@ export interface WorldState {
     casinoLog?: number;
     /** 마지막으로 건물을 옮겨 짓기로 한 시각, 그 이야기와 해체 이야기를 남긴 시각 */
     move?: number; moveLog?: number; razeLog?: number;
+    /** 엔딩을 맞을지 마지막으로 점친 날 */
+    endRoll?: number;
   };
   fx: Fx[];
   // ─── v2 ───
@@ -630,6 +638,41 @@ export interface WorldState {
   // ─── v6 ───
   casino: Casino | null;
   civic: Civic | null;
+  // ─── v7 ───
+  /** 맞이한 엔딩 (한 번 맞으면 새로 시작할 때까지 남는다) */
+  ending?: Ending | null;
+  /** 크레딧에 띄울 굵직한 일들 (연대기가 넘쳐 지워져도 남긴다) */
+  annals?: ChronicleEntry[];
+  /** 새로 시작하기 전까지 흐른 게임 시간 (저장 순서를 지키는 데 쓴다) */
+  base?: number;
+  /** 지금 시간이 흐르는 배속 (저장하지 않는다) */
+  spd?: number;
+  /** 핵전쟁으로 그을린 땅 0..1 (조금씩 아문다) */
+  scar?: number;
+}
+
+export type EndingKind = "nuke" | "space" | "alien" | "eternal" | "robot";
+
+/** 과학 시대에 100명이 모이면 맞을 수 있는 결말 */
+export interface Ending {
+  kind: EndingKind;
+  /** 시작한 시각, 지금 단계, 단계마다 시작된 시각 */
+  t0: number;
+  ph: number;
+  ts: number[];
+  /** 연출의 한가운데 (발사대 · 차원문 · 폭심 · 빛기둥) */
+  x: number;
+  z: number;
+  /** 외계 침공에서 이기는지 (시작할 때 군세로 정해진다) */
+  win?: number;
+  /** 핵전쟁을 벌인 상대 · 우주선 이름 */
+  foe?: string;
+  /** 결말에 이른 시각: 이때부터 크레딧을 띄운다 */
+  done?: number;
+  /** 엔딩을 맞을 때 섬에 있던 사람들 */
+  cast: string[];
+  /** 탑승 · 빛 · 로봇으로 바뀐 사람 수 */
+  n: number;
 }
 
 /** 불길: 건물에 붙었거나(sid) 번개·관찰자의 불씨로 땅에 번진 불 */

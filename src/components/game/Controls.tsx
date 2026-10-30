@@ -14,6 +14,8 @@ import { env } from "./env";
 
 export const camState = {
   tx: 0, tz: 0, ty: 2,
+  /** 땅보다 이만큼 위를 바라본다 (엔딩: 버섯구름 · 날아오르는 우주선) */
+  lift: 0,
   yaw: 0, pitch: 0.75, dist: 38,
   cur: { tx: 0, tz: 0, ty: 2, yaw: 0, pitch: 0.75, dist: 38 },
   ready: false,
@@ -318,7 +320,7 @@ export function Controls({ terrain }: { terrain: Terrain }) {
     const lim = 150;
     camState.tx = THREE.MathUtils.clamp(camState.tx, -lim, lim);
     camState.tz = THREE.MathUtils.clamp(camState.tz, -lim, lim);
-    camState.ty = Math.max(0, terrain.height(camState.tx, camState.tz)) + 1.2;
+    camState.ty = Math.max(0, terrain.height(camState.tx, camState.tz)) + 1.2 + camState.lift;
 
     const c = camState.cur;
     const f = 1 - Math.exp(-dt * 6);
@@ -337,8 +339,8 @@ export function Controls({ terrain }: { terrain: Terrain }) {
     if (py < floor) py = floor;
     px = THREE.MathUtils.clamp(px, -400, 400);
     pz = THREE.MathUtils.clamp(pz, -400, 400);
-    // 지진: 화면이 떨린다
-    const q = env.quake;
+    // 지진 · 핵폭발 · 우주선 발사: 화면이 떨린다
+    const q = Math.max(env.quake, env.rumble);
     if (q > 0.01) {
       const a = q * Math.min(1.2, c.dist * 0.03);
       px += (Math.random() - 0.5) * a;

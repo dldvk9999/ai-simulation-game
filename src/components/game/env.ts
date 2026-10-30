@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { hourOf, seasonOf, sunElevation } from "@/sim/clock";
 import { DAY, DAYS_PER_SEASON, TIME_SCALE } from "@/sim/constants";
 import { floodLevel, quakeShake } from "@/sim/disaster";
+import { ashOf } from "@/sim/ending";
 import { clamp, smoothstep } from "@/sim/noise";
 import type { WorldState } from "@/sim/types";
 
@@ -44,6 +45,11 @@ export const env = {
   quake: 0,
   /** 태풍 */
   typhoon: 0,
+  /** 핵전쟁의 잿빛 하늘 0..1 · 그을린 땅 */
+  ash: 0,
+  scar: 0,
+  /** 엔딩 연출이 흔드는 정도 (핵폭발 · 우주선 발사) */
+  rumble: 0,
 };
 
 const c = (hex: string) => new THREE.Color(hex);
@@ -54,6 +60,7 @@ const SKY = {
   stormTop: c("#3a4250"), stormHor: c("#6c7480"),
   snowTop: c("#9aa8ba"), snowHor: c("#dfe6ee"),
   cloudTop: c("#7d93ad"), cloudHor: c("#c7d2dd"),
+  ashTop: c("#4a4038"), ashHor: c("#9a8670"),
 };
 const tmp = new THREE.Color();
 const tmp2 = new THREE.Color();
@@ -62,16 +69,17 @@ let lastWorldTime = -1;
 let lastWorldAt = 0;
 const target = { rain: 0, snow: 0, storm: 0, cloud: 0 };
 
-/** 실시간 렌더 시간을 부드럽게 추정 */
+/** 실시간 렌더 시간을 부드럽게 추정 (배속을 누르고 있으면 그만큼 빠르게) */
 function renderTime(w: WorldState, now: number) {
+  const rate = TIME_SCALE * (w.spd ?? 1);
   if (w.time !== lastWorldTime) {
     // 크게 튀면(동기화 직후) 바로 맞춘다
-    const est = lastWorldTime + ((now - lastWorldAt) / 1000) * TIME_SCALE;
+    const est = lastWorldTime + ((now - lastWorldAt) / 1000) * rate;
     if (lastWorldTime < 0 || Math.abs(est - w.time) > 600) env.time = w.time;
     lastWorldTime = w.time;
     lastWorldAt = now;
   }
-  const est = lastWorldTime + ((now - lastWorldAt) / 1000) * TIME_SCALE;
+  const est = lastWorldTime + ((now - lastWorldAt) / 1000) * rate;
   env.time += (est - env.time) * 0.15;
   return env.time;
 }
@@ -111,8 +119,10 @@ export function updateEnv(w: WorldState, dt: number, now: number) {
   env.quake = quakeShake(w, t);
   const ty = w.disaster?.type === "typhoon" && t >= w.disaster.start && t <= w.disaster.until ? 1 : 0;
   env.typhoon += (ty - env.typhoon) * k;
+  env.ash += (ashOf(w, t) - env.ash) * (1 - Math.exp(-dt * 1.5));
+  env.scar += ((w.scar ?? 0) - env.scar) * (1 - Math.exp(-dt * 0.8));
 
-  const gloom = clamp(env.cloud * 0.35 + env.rain * 0.3 + env.storm * 0.35, 0, 1);
+  const gloom = clamp(env.cloud * 0.35 + env.rain * 0.3 + env.storm * 0.35 + env.ash * 0.3, 0, 1);
   // 하늘
   tmp.copy(SKY.nightTop).lerp(SKY.duskTop, smoothstep(-0.25, 0.0, e)).lerp(SKY.dayTop, smoothstep(0.0, 0.35, e));
   tmp2.copy(SKY.nightHor).lerp(SKY.duskHor, smoothstep(-0.25, 0.0, e)).lerp(SKY.dayHor, smoothstep(0.05, 0.4, e));
@@ -121,13 +131,18 @@ export function updateEnv(w: WorldState, dt: number, now: number) {
   const dim = 0.25 + 0.75 * env.day;
   env.skyTop.copy(tmp).lerp(tmpC(grey, dim), gloom);
   env.skyHorizon.copy(tmp2).lerp(tmpC(greyH, dim), gloom);
+  // 낙진: 누런 잿빛으로 가라앉는다
+  if (env.ash > 0.01) {
+    env.skyTop.lerp(tmpC(SKY.ashTop, dim), env.ash * 0.85);
+    env.skyHorizon.lerp(tmpC(SKY.ashHor, dim), env.ash * 0.85);
+  }
   env.fog.copy(env.skyHorizon);
-  env.fogNear = 60 - gloom * 30 - env.snowFall * 15;
-  env.fogFar = 460 - gloom * 220 - env.snowFall * 120;
+  env.fogNear = 60 - gloom * 30 - env.snowFall * 15 - env.ash * 12;
+  env.fogFar = 460 - gloom * 220 - env.snowFall * 120 - env.ash * 50;
 
   // 빛
   env.sunColor.set("#ffffff").lerp(c2("#ffb070"), env.dusk * 0.85);
-  env.sunIntensity = 2.6 * env.day * (1 - gloom * 0.7);
+  env.sunIntensity = 2.6 * env.day * (1 - gloom * 0.7) * (1 - env.ash * 0.35);
   env.moonIntensity = 0.35 * env.night * (1 - gloom * 0.6);
   env.hemiSky.copy(env.skyTop).lerp(c2("#ffffff"), 0.35);
   env.hemiGround.set("#5f6b45").lerp(c2("#1b2232"), env.night);

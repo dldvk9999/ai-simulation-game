@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { ChronicleEntry, Emotion, Need, Outfit, WeatherType } from "@/sim/types";
+import type { Credits } from "@/sim/ending";
+import type { ChronicleEntry, Emotion, EndingKind, Need, Outfit, WeatherType } from "@/sim/types";
 
 export type Phase = "connecting" | "catchup" | "syncing" | "running" | "error";
 
@@ -79,6 +80,21 @@ export interface Toast {
   at: number;
 }
 
+/** 맞이한 엔딩: 연출 중이거나 끝났다 */
+export interface EndingHud {
+  kind: EndingKind;
+  icon: string;
+  title: string;
+  caption: string;
+  ph: number;
+  /** 지금 단계가 얼마나 지났는지 0..1 */
+  prog: number;
+  done: boolean;
+  key: number;
+}
+
+export type PeopleTab = "people" | "nation" | "stock";
+
 export interface HudState {
   phase: Phase;
   error: string | null;
@@ -97,6 +113,15 @@ export interface HudState {
   era: string;
   pop: number;
   abroad: number;
+  /** 기계의 몸을 얻은 로봇 수 · 지금 배속 */
+  robots: number;
+  speed: number;
+  ending: EndingHud | null;
+  credits: Credits | null;
+  creditsOpen: boolean;
+  confirmRestart: boolean;
+  /** 사람들 패널에서 고른 칸 */
+  peopleTab: PeopleTab;
   generation: number;
   people: PersonSummary[];
   groups: GroupSummary[];
@@ -152,6 +177,13 @@ export const useHud = create<HudState>(() => ({
   era: "",
   pop: 0,
   abroad: 0,
+  robots: 0,
+  speed: 1,
+  ending: null,
+  credits: null,
+  creditsOpen: false,
+  confirmRestart: false,
+  peopleTab: "people",
   generation: 1,
   people: [],
   groups: [],

@@ -11,8 +11,8 @@ import {
 } from "./settlement";
 import type { Terrain } from "./terrain";
 import { EMOJI, josa, KID_TALK, thought } from "./text";
-import type { Emotion, Gesture, Person, Stock, Structure, WeatherType, WorldState } from "./types";
-import { addFx, bump, chron, createPerson, dist, findById, knows, living, spawnCastaway } from "./world";
+import type { Emotion, Gesture, Need, Person, Stock, Structure, WeatherType, WorldState } from "./types";
+import { addFx, bump, chron, createPerson, deathless, dist, findById, knows, living, spawnCastaway } from "./world";
 
 export interface Ctx {
   T: Terrain;
@@ -145,6 +145,12 @@ export function nearFire(ctx: Ctx, x: number, z: number, r = 4.5) {
 }
 
 export function updateNeeds(w: WorldState, ctx: Ctx, p: Person, dt: number) {
+  // 기계의 몸은 먹지도 자지도 않는다
+  if (p.robot) {
+    for (const k of Object.keys(p.needs) as Need[]) p.needs[k] = 100;
+    p.health = 100;
+    return;
+  }
   const h = dt / HOUR;
   const a = p.act;
   const asleep = !!a && a.ph === 1 && (a.k === "sleep" || a.k === "unconscious");
@@ -327,6 +333,11 @@ export function checkDeath(w: WorldState, T: Terrain, p: Person) {
 }
 
 export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
+  // 로봇과 영원한 삶을 얻은 사람은 쓰러져도 다시 일어난다
+  if (deathless(w, p)) {
+    p.health = Math.max(p.health, 20);
+    return;
+  }
   p.alive = 0;
   p.died = w.time;
   p.cause = cause;
@@ -370,10 +381,25 @@ export function die(w: WorldState, T: Terrain, p: Person, cause: string) {
 }
 
 /** 매일 한 번 */
+/** 가족 말고 마음에 두는 사람 수 */
+const REL_KEEP = 24;
+/** 마지막으로 그 일을 겪은 시각만 담는 기억 */
+const STALE = new Set(["reeval", "bst", "urgent", "night", "medAt", "nursed", "evac", "council", "mourn", "buildFail", "trade"]);
+
 export function dailyPeople(w: WorldState, T: Terrain) {
   // 섬을 떠난(세상을 떠난) 사람과의 정과 거의 모르는 사이는 잊는다 (저장이 불어나지 않게)
   const ids = new Set(w.people.map((q) => String(q.id)));
   for (const q of w.people) for (const [k, v] of Object.entries(q.rel)) if (!ids.has(k) || Math.abs(v) < 0.02) delete q.rel[k];
+  // 사람이 많아지면 가족 말고는 가장 가까운 이들만 마음에 둔다
+  for (const q of w.people) {
+    const list = Object.entries(q.rel);
+    if (list.length <= REL_KEEP) continue;
+    const fam = new Set([...q.parents, ...(q.partner != null ? [q.partner] : [])].map(String));
+    for (const c of w.people) if (c.parents.includes(q.id)) fam.add(String(c.id));
+    list.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    let n = 0;
+    for (const [k] of list) if (!fam.has(k) && n++ >= REL_KEEP) delete q.rel[k];
+  }
   const alive = living(w);
   // 노환
   for (const p of alive) {
@@ -385,9 +411,9 @@ export function dailyPeople(w: WorldState, T: Terrain) {
 
   // 짝
   for (const a of adults) {
-    if (a.partner != null || age(w, a) > 55) continue;
+    if (a.partner != null || age(w, a) > 55 || a.robot) continue;
     for (const b of adults) {
-      if (b === a || b.sex === a.sex || b.partner != null || age(w, b) > 55) continue;
+      if (b === a || b.sex === a.sex || b.partner != null || age(w, b) > 55 || b.robot) continue;
       if (a.parents.some((x) => b.parents.includes(x))) continue;
       if (a.parents.includes(b.id) || b.parents.includes(a.id)) continue;
       if ((a.rel[b.id] ?? 0) > 0.55 && (b.rel[a.id] ?? 0) > 0.55) {
@@ -407,10 +433,12 @@ export function dailyPeople(w: WorldState, T: Terrain) {
   // 임신
   const food = foodTotal(w);
   const cap = houseCapacity(w);
+  // 사람들이 기계의 몸을 얻는 동안에는 아이를 갖지 않는다
+  const machines = w.ending?.kind === "robot";
   for (const f of adults) {
-    if (f.sex !== "F" || f.preg || f.partner == null) continue;
+    if (f.sex !== "F" || f.preg || f.partner == null || f.robot || machines) continue;
     const m = findById(w.people, f.partner);
-    if (!m || !m.alive) continue;
+    if (!m || !m.alive || m.robot) continue;
     const yrs = age(w, f);
     if (yrs < 18 || yrs > 42) continue;
     if (w.people.filter((q) => q.alive).length >= MAX_POP) continue;
@@ -439,10 +467,11 @@ export function dailyPeople(w: WorldState, T: Terrain) {
     dailyArrivals(w, T, settled);
   }
 
-  // 오래된 기억 정리
+  // 오래된 기억 정리 (지난 일의 시각은 사흘이 지나면 없던 일과 같다)
   for (const p of now) {
     for (const k of Object.keys(p.seen)) {
       if ((k.startsWith("g") || k.startsWith("f")) && w.time - p.seen[k] > DAY) delete p.seen[k];
+      else if (STALE.has(k) && p.seen[k] > 0 && w.time - p.seen[k] > 3 * DAY) delete p.seen[k];
     }
   }
   assignHomes(w);

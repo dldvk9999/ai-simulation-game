@@ -173,7 +173,7 @@ function reachOf(w: WorldState, T: Terrain, F: Frame) {
     }
     S.dists = ds.sort((x, y) => x - y);
   }
-  const n = Math.max(18, Math.min(46, Math.round((w.stats?.maxPop ?? 0) * 0.6) + 12));
+  const n = Math.max(18, Math.min(72, Math.round((w.stats?.maxPop ?? 0) * 0.6) + 12));
   return S.dists[Math.min(n, S.dists.length) - 1] ?? 30;
 }
 

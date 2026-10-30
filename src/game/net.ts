@@ -181,11 +181,20 @@ function fromB64(b64: string) {
 const PLANT_ZERO = new Set(["stump", "regrow", "burn", "fruit"]);
 /** 식물의 방향·크기는 번호에서 다시 계산한다 (plantLook) */
 const PLANT_LOOK = new Set(["rot", "s"]);
+/** 욕구는 0..100이라 정수로 충분하다 */
+const NEED_KEYS = new Set(["hunger", "thirst", "energy", "warmth", "social", "fun"]);
+/** 식물 · 바위 · 짐승 · 물고기의 자리와 방향은 10cm 단위로 */
+const COARSE = new Set(["x", "z", "tx", "tz", "rot", "s"]);
+const coarse = (o: object) => "kind" in o && ("regrow" in o || "amt" in o || "tame" in o || "dies" in o);
 /** 소수는 둘째 자리까지만: 위치·욕구·감정 값에는 충분하고 저장·전송 크기가 절반으로 준다. 시각·돈처럼 큰 수는 정수로 */
 export function compact(this: unknown, k: string, v: unknown) {
   if ((PLANT_LOOK.has(k) || (v === 0 && PLANT_ZERO.has(k))) && this && typeof this === "object" && "regrow" in this && "kind" in this) return undefined;
+  // 말풍선은 몇 초뿐이라 저장하지 않는다 (움직임과 함께 따로 보낸다)
+  if (k === "bubble") return undefined;
   if (typeof v !== "number" || Number.isInteger(v)) return v;
   if (Math.abs(v) >= 1000) return Math.round(v);
+  if (NEED_KEYS.has(k)) return Math.round(v);
+  if (COARSE.has(k) && this && typeof this === "object" && coarse(this)) return Math.round(v * 10) / 10;
   return Math.round(v * 100) / 100;
 }
 

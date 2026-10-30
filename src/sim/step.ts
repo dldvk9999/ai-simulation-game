@@ -14,6 +14,7 @@ import { chooseFocus, foodTotal, houseCapacity, hourlyTown, planFarms, planProje
 import { dailyEconomy } from "./economy";
 import { dailyCasino, hourlyCasino } from "./casino";
 import { dailyCivic } from "./civic";
+import { dailyEnding, hourlyEnding, scenePerson, updateEnding } from "./ending";
 import { dailyReligion } from "./religion";
 import { dailyNation, updateNation } from "./nation";
 import { dailySociety } from "./society";
@@ -39,6 +40,7 @@ export function step(w: WorldState, dt: number) {
   updateFires(w, T, dt);
   updateNation(w, T, dt);
   updateItems(w, T, dt);
+  updateEnding(w, T, dt);
 
   const ctx = makeCtx(w, T);
   for (const p of w.people) {
@@ -46,8 +48,11 @@ export function step(w: WorldState, dt: number) {
     updateNeeds(w, ctx, p, dt);
     updateIllness(w, ctx, p, dt);
     updateEmotions(w, ctx, p, dt);
-    perceive(w, ctx, p, dt);
-    runPerson(w, ctx, p, dt);
+    // 엔딩을 맞는 동안에는 모두가 함께 움직인다
+    if (!scenePerson(w, ctx, p, dt)) {
+      perceive(w, ctx, p, dt);
+      runPerson(w, ctx, p, dt);
+    }
     checkDeath(w, T, p);
   }
   if (w.voyages.length) updateVoyages(w);
@@ -59,6 +64,7 @@ export function step(w: WorldState, dt: number) {
     planFarms(w, T);
     hourlyTown(w, T);
     hourlyCasino(w);
+    hourlyEnding(w, T);
     if (!w.tech.focus) chooseFocus(w);
   }
   const d = dayOf(w.time);
@@ -86,6 +92,7 @@ function daily(w: WorldState) {
   dailyVoyage(w);
   dailyBeasts(w);
   dailyKids(w);
+  dailyEnding(w);
   const pop = living(w).length;
   dailyMorale(w, { housed: houseCapacity(w) >= pop, fed: foodTotal(w) >= pop * 6 });
   // 바위는 천천히 다시 드러난다 (귀한 광맥일수록 더디게)

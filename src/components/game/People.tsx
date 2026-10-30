@@ -7,7 +7,7 @@ import { dominant } from "@/sim/people";
 import type { Terrain } from "@/sim/terrain";
 import { EMOJI } from "@/sim/text";
 import type { Person } from "@/sim/types";
-import { findById } from "@/sim/world";
+import { deathless, findById } from "@/sim/world";
 import { useHud } from "@/game/hud";
 import { useLabelLayer, useRuntime, useWorldVersion } from "./context";
 import { follow, lerpAngle } from "./env";
@@ -34,6 +34,10 @@ const headGeo = new THREE.IcosahedronGeometry(0.2, 1);
 const eyeMat = flat("#1d1d1f");
 const blushMat = new THREE.MeshBasicMaterial({ color: "#ff8fa3", transparent: true, opacity: 0.7 });
 const ringGeo = new THREE.RingGeometry(0.5, 0.62, 24);
+/** 로봇은 은빛 몸에 푸르게 빛나는 눈 · 영원한 삶을 얻은 사람은 머리 위에 금빛 고리 */
+const robotEyeMat = new THREE.MeshBasicMaterial({ color: "#5ff0ff" });
+const haloGeo = new THREE.TorusGeometry(0.16, 0.022, 6, 20);
+const haloMat = new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
 const ringMat = new THREE.MeshBasicMaterial({ color: "#fff6c2", transparent: true, opacity: 0.85, depthWrite: false });
 const toolMats = {
   wood: flat("#8a5f3d"), stone: flat("#8c877f"), string: flat("#e8e2d0"),
@@ -69,6 +73,7 @@ interface Rig {
   legR: THREE.Group;
   eyes: THREE.Group;
   blush: THREE.Group;
+  halo: THREE.Mesh;
   carry: THREE.Mesh;
   tools: Record<string, THREE.Object3D>;
   ring: THREE.Mesh;
@@ -103,9 +108,20 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
   const last = useRef({ text: "", emoji: "", vis: "" });
   const phase = useMemo(() => (id * 1.618) % 6.28, [id]);
 
-  const outfitKey = p0 ? `${p0.outfit}` : "rag";
+  const outfitKey = p0 ? `${p0.outfit}:${p0.robot ? 1 : 0}` : "rag";
   const mats = useMemo(() => {
     if (!p0) return null;
+    if (p0.robot) {
+      const metal = { metalness: 0.25, roughness: 0.4 };
+      return {
+        skin: flat("#dfe6ec", metal),
+        hair: flat("#9fb0bf", metal),
+        top: flat(pickC(["#c3d0dc", "#b7c9da", "#cdc7d9"], p0.hue.cloth), metal),
+        pants: flat("#7f8c99", metal),
+        long: false,
+        eye: robotEyeMat,
+      };
+    }
     const oc = outfitColors(p0);
     const yrs = rt.world ? ageYears(p0.birth, rt.world.time) : 30;
     const hair = yrs > 62 ? "#d8d4cc" : pickC(HAIR, p0.hue.hair);
@@ -115,6 +131,7 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
       top: flat(oc.top),
       pants: flat(oc.pants),
       long: p0.sex === "F",
+      eye: eyeMat,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, outfitKey]);
@@ -387,7 +404,8 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
       case "aim": {
         // 활이나 총을 겨눈다
         aR = 1.55; aL = 1.5; aLx = -0.42; aRx = 0.05; tz = -0.04; hz = -0.05;
-        const sub = p.act?.sub;
+        // 엔딩에서 함께 맞설 때는 든 무기가 res에 담겨 온다
+        const sub = p.act?.k === "scene" ? p.act.res : p.act?.sub;
         const guns = w.stock.rifle || w.stock.musket;
         tool = sub === "musket" || sub === "rifle" || (sub === "tower" && guns) ? "gun" : "bow";
         if (Math.sin(t * 2.2 + p.id) > 0.92) { aR = 1.3; tx = -0.06; }
@@ -440,7 +458,9 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
     r.legL.rotation.set(0, 0, lL);
     r.legR.rotation.set(0, 0, lR);
     r.eyes.scale.set(1, eyes, 1);
-    r.blush.visible = p.emo.joy > 0.45 || p.emo.love > 0.4;
+    r.blush.visible = !p.robot && (p.emo.joy > 0.45 || p.emo.love > 0.4);
+    r.halo.visible = !!p.alive && !p.robot && deathless(w, p);
+    if (r.halo.visible) r.halo.rotation.z = t * 0.6;
     for (const [k, o] of Object.entries(r.tools)) o.visible = k === tool;
     r.carry.visible = !!p.carry && anim !== "sleep";
     if (p.carry) (r.carry.material as THREE.MeshStandardMaterial).color.set(CARRY_COLOR[p.carry.res] ?? "#a07850");
@@ -584,9 +604,10 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
               <mesh geometry={box} material={mats.hair} position={[-0.15, 0.22, 0]} scale={[0.1, 0.2, 0.38]} />
             )}
             <group ref={set("eyes")} position={[0.185, 0.2, 0]}>
-              <mesh geometry={box} material={eyeMat} position-z={0.075} scale={[0.02, 0.05, 0.035]} />
-              <mesh geometry={box} material={eyeMat} position-z={-0.075} scale={[0.02, 0.05, 0.035]} />
+              <mesh geometry={box} material={mats.eye} position-z={0.075} scale={[0.02, 0.05, 0.035]} />
+              <mesh geometry={box} material={mats.eye} position-z={-0.075} scale={[0.02, 0.05, 0.035]} />
             </group>
+            <mesh ref={set("halo")} geometry={haloGeo} material={haloMat} position-y={0.62} rotation-x={Math.PI / 2} visible={false} />
             <group ref={set("blush")} position={[0.18, 0.12, 0]} visible={false}>
               <mesh geometry={box} material={blushMat} position-z={0.11} scale={[0.01, 0.035, 0.06]} />
               <mesh geometry={box} material={blushMat} position-z={-0.11} scale={[0.01, 0.035, 0.06]} />
@@ -601,7 +622,7 @@ function PersonView({ id, terrain }: { id: number; terrain: Terrain }) {
 export function People({ terrain }: { terrain: Terrain }) {
   const rt = useRuntime();
   const version = useWorldVersion(100);
-  const ids = useMemo(() => (rt.world ? rt.world.people.map((p) => `${p.id}:${p.outfit}`) : []),
+  const ids = useMemo(() => (rt.world ? rt.world.people.map((p) => `${p.id}:${p.outfit}:${p.robot ? 1 : 0}`) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [version]);
   return (

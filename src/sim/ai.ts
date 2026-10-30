@@ -21,6 +21,7 @@ import { payWage, tradeArrive, tradeCand, tradeFinish } from "./economy";
 import { atWar, musterCand } from "./nation";
 import { addictFinish, addictPlan, addictWork, counselCand, counselFinish, gambleCand, gambleWork } from "./casino";
 import { roadMul } from "./civic";
+import { SCENE_LABEL } from "./ending";
 import { clamp } from "./noise";
 import {
   age, Ctx, dominant, feel, homeOf, isAdult, lying, mood, nearFire, say,
@@ -2349,6 +2350,7 @@ export const ACT_LABEL: Record<ActKind, string> = {
   carried: "품에 안겨 있는 중", fuss: "보채는 중", assist: "어른 일을 거드는 중",
   rite: "제단에서 의식을 올리는 중", trade: "물건을 사고파는 중", muster: "나라를 지키러 바닷가에 모인 중",
   gamble: "도박장에서 내기하는 중", addict: "게임중독으로 집에 틀어박힌 중", counsel: "도박에 빠질 듯한 이를 타이르는 중",
+  scene: "모두와 함께 있는 중",
 };
 
 const FUSS_LABEL: Record<string, string> = {
@@ -2361,6 +2363,7 @@ const CARE_LABEL: Record<string, string> = {
 
 export function actLabel(a: Act | null) {
   if (!a) return "";
+  if (a.k === "scene") return SCENE_LABEL[a.sub ?? ""] ?? ACT_LABEL.scene;
   if (a.k === "gather" && a.ph === 2) return `${RES_NAME[a.res!] ?? "짐"}을(를) 나르는 중`;
   if (a.k === "gather" && a.res && METAL_INFO[a.res as Metal]) return `광맥에서 ${RES_NAME[a.res]} 캐는 중`;
   if (a.k === "gather" && a.res) return a.res === "wood" ? "나무를 베는 중" : `${RES_NAME[a.res]} 모으는 중`;

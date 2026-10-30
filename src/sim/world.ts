@@ -6,7 +6,7 @@ import { chance, gauss, int, pick, rand, range, RngHolder, weighted } from "./rn
 import { getTerrain, Terrain } from "./terrain";
 import { josa, randomName } from "./text";
 import type {
-  Animal, AnimalKind, ChronicleKind, Emotion, Fish, FishKind, FxType, Item, Metal, Person, Plant, PlantKind, Res, Rock,
+  Animal, AnimalKind, ChronicleEntry, ChronicleKind, Emotion, Fish, FishKind, FxType, Item, Metal, Person, Plant, PlantKind, Res, Rock,
   RockKind, Stock, Structure, StructureType, Trait, WorldState,
 } from "./types";
 
@@ -16,8 +16,23 @@ export function addFx(w: WorldState, type: FxType, x: number, z: number, ref?: n
   w.fx.push({ id: newId(w), t: w.time, type, x, z, ref, v });
 }
 
+/** 크레딧에 남길 일: 종류마다 처음 몇 번만 (시대가 바뀐 일과 엔딩은 모두) */
+const ANNAL: Partial<Record<ChronicleKind, number>> = {
+  arrive: 1, build: 1, birth: 1, death: 1, couple: 1, era: 9, society: 3, nation: 5, disaster: 3, beast: 2,
+  voyage: 1, faith: 1, trade: 1, fire: 1, disease: 1, casino: 1, civic: 1, ending: 12,
+};
+
+function remember(w: WorldState, c: ChronicleEntry) {
+  const cap = ANNAL[c.k];
+  if (!cap) return;
+  const list = (w.annals ??= []);
+  if (list.filter((x) => x.k === c.k).length < cap) list.push(c);
+}
+
 export function chron(w: WorldState, k: ChronicleKind, text: string) {
-  w.chronicle.push({ t: w.time, k, text: `${dayOf(w.time)}일째 · ${text}` });
+  const entry = { t: w.time, k, text: `${dayOf(w.time)}일째 · ${text}` };
+  w.chronicle.push(entry);
+  remember(w, entry);
   w.stats.chron = (w.stats.chron ?? w.chronicle.length - 1) + 1;
   while (w.chronicle.length > CHRONICLE_LIMIT) {
     // 날씨·계절 같은 가벼운 기록부터 지운다
@@ -55,6 +70,10 @@ export function missing(w: WorldState, cost: Stock): Stock {
 export const knows = (w: WorldState, tech: string) => w.tech.known.includes(tech);
 /** 섬에 있는 산 사람 (바다 건너 나가 있는 사람은 빼고) */
 export const living = (w: WorldState) => w.people.filter((p) => p.alive && !p.away);
+/** 사람 수: 기계의 몸을 얻은 로봇은 빼고, 바다 건너 나간 사람은 넣는다 */
+export const humans = (w: WorldState) => w.people.filter((p) => p.alive && !p.robot);
+/** 로봇이 되었거나 영원한 삶을 얻어 죽지 않는다 */
+export const deathless = (w: WorldState, p: Person) => !!p.robot || (w.ending?.kind === "eternal" && (w.ending.ph >= 2 || w.ending.done != null));
 export const onIsland = (p: Person) => !!p.alive && !p.away;
 
 export const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
@@ -254,12 +273,13 @@ function spacedOk(list: { x: number; z: number }[], x: number, z: number, d: num
   return true;
 }
 
-export function createWorld(seed: number, createdAt = Date.now()): WorldState {
+/** salt를 주면 같은 섬이라도 처음 표류자와 동식물이 다르게 놓인다 (새로 시작하기) */
+export function createWorld(seed: number, createdAt = Date.now(), salt = 0): WorldState {
   const T = getTerrain(seed);
   const w: WorldState = {
     v: SCHEMA_VERSION,
     seed,
-    rng: (seed ^ 0xa5a5a5a5) | 0,
+    rng: (seed ^ 0xa5a5a5a5 ^ Math.imul(salt, 0x9e3779b9)) | 0,
     time: START_HOUR * HOUR,
     nextId: 1,
     rev: 1,
@@ -289,6 +309,8 @@ export function createWorld(seed: number, createdAt = Date.now()): WorldState {
     visit: null,
     casino: null,
     civic: null,
+    ending: null,
+    annals: [],
   };
 
   // 식물 (처음 만든 섬보다 1.7배 빽빽하게)
@@ -473,6 +495,11 @@ export function migrateWorld(w: WorldState) {
   w.history.lastFire ??= 0;
   w.casino ??= null;
   w.civic ??= null;
+  w.ending ??= null;
+  if (!w.annals) {
+    w.annals = [];
+    for (const c of w.chronicle) remember(w, c);
+  }
   for (const p of w.people) {
     p.ill ??= 0;
     p.group ??= null;

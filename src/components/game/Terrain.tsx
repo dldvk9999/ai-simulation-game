@@ -79,7 +79,7 @@ export function buildTerrainGeometry(T: TerrainData) {
 export function TerrainMesh({ terrain }: { terrain: TerrainData }) {
   const geo = useMemo(() => buildTerrainGeometry(terrain), [terrain]);
   const { mat, uniforms } = useMemo(() => {
-    const uniforms = { uSnow: { value: 0 }, uWet: { value: 0 } };
+    const uniforms = { uSnow: { value: 0 }, uWet: { value: 0 }, uScar: { value: 0 } };
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.96, metalness: 0 });
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, uniforms);
@@ -87,13 +87,16 @@ export function TerrainMesh({ terrain }: { terrain: TerrainData }) {
         .replace("#include <common>", "#include <common>\nvarying float vH;\nvarying float vNy;")
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvH = position.y;\nvNy = normal.y;");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform float uSnow;\nuniform float uWet;\nvarying float vH;\nvarying float vNy;")
+        .replace("#include <common>", "#include <common>\nuniform float uSnow;\nuniform float uWet;\nuniform float uScar;\nvarying float vH;\nvarying float vNy;")
         .replace(
           "#include <color_fragment>",
           `#include <color_fragment>
           float snowAmt = uSnow * smoothstep(0.55, 0.85, vNy) * smoothstep(0.15, 0.9, vH);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.95, 1.0), snowAmt);
-          diffuseColor.rgb *= 1.0 - uWet * 0.22 * step(0.3, vH) * (1.0 - snowAmt);`,
+          diffuseColor.rgb *= 1.0 - uWet * 0.22 * step(0.3, vH) * (1.0 - snowAmt);
+          // 핵전쟁으로 그을린 땅: 잿빛 흙으로 (두 달에 걸쳐 다시 푸르러진다)
+          float scarAmt = uScar * smoothstep(0.1, 0.8, vH);
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.27, 0.24, 0.21) + diffuseColor.rgb * 0.18, scarAmt * 0.88);`,
         );
     };
     return { mat, uniforms };
@@ -102,6 +105,7 @@ export function TerrainMesh({ terrain }: { terrain: TerrainData }) {
   useFrame(() => {
     uniforms.uSnow.value = env.snowCover;
     uniforms.uWet.value = env.wet;
+    uniforms.uScar.value = env.scar;
   });
 
   return <mesh geometry={geo} material={mat} receiveShadow castShadow name="terrain" />;

@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { InstallButton } from "@/components/InstallButton";
-import { useHud, type GroupSummary, type PersonSummary } from "@/game/hud";
+import { useHud, type GroupSummary, type PeopleTab, type PersonSummary } from "@/game/hud";
+import type { Credits } from "@/sim/ending";
 import type { ChronicleEntry } from "@/sim/types";
 import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
@@ -55,7 +56,11 @@ export function Hud({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExi
           <Drawer />
           <Toasts />
           <Hint />
+          <SpeedButtons rt={rt} />
+          <EndingBanner />
           <Away />
+          <CreditsModal rt={rt} />
+          <RestartConfirm rt={rt} />
         </>
       )}
       <Overlay onExit={onExit} />
@@ -94,7 +99,14 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
         <div className="chips">
           <span className="chip era">{s.era}</span>
           <span className="chip">👥 {s.pop}명</span>
+          {s.robots > 0 && <span className="chip robot">🤖 로봇 {s.robots}</span>}
           {s.abroad > 0 && <span className="chip">⛵ {s.abroad}명 섬 밖</span>}
+          {s.speed > 1 && <span className="chip fast">⏩ {s.speed}배속</span>}
+          {s.ending?.done && (
+            <button className="chip ending" onClick={() => useHud.setState({ creditsOpen: true })} title="크레딧 다시 보기">
+              🏁 {s.ending.title}
+            </button>
+          )}
           {s.disaster && (
             <span className="chip alert">
               {s.disaster.icon} {s.disaster.name}{s.disaster.coming ? " 다가옴" : ""}
@@ -138,6 +150,7 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
             {m.icon}
           </button>
         ))}
+        {s.ending?.done && <button onClick={() => useHud.setState({ confirmRestart: true })} title="새로 시작하기">🔄</button>}
         <InstallButton kind="tool" />
         <button onClick={mute} title="소리">{s.muted ? "🔇" : "🔊"}</button>
         <button onClick={exit} title="나가기">🚪</button>
@@ -165,6 +178,12 @@ function TopBar({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExit: (
                 {m.label}
               </button>
             ))}
+            {s.ending?.done && (
+              <button onClick={() => { useHud.setState({ confirmRestart: true }); setMenu(false); }}>
+                <span>🔄</span>
+                새로 시작하기
+              </button>
+            )}
             <InstallButton kind="menu" onPick={() => setMenu(false)} />
             <button onClick={mute}>
               <span>{s.muted ? "🔇" : "🔊"}</span>
@@ -445,16 +464,46 @@ function PersonItem({ p }: { p: PersonSummary }) {
   );
 }
 
+/** 사람들 패널: 사람 · 나라 · 창고를 칸으로 나눠 한 번에 하나씩 */
 function PeopleDrawer() {
+  const tab = useHud((s) => s.peopleTab);
+  const hasNation = useHud((s) => !!(s.nation || s.faiths.length || s.economy || s.civic || s.casino));
+  const cur: PeopleTab = tab === "nation" && !hasNation ? "people" : tab;
+  const tabs: [PeopleTab, string][] = [["people", "👥 사람"], ...(hasNation ? ([["nation", "👑 나라"]] as [PeopleTab, string][]) : []), ["stock", "📦 창고"]];
+  return (
+    <div className="card drawer people-drawer">
+      <button className="x" onClick={() => useHud.setState({ panel: "none" })}>✕</button>
+      <nav className="ptabs" role="tablist">
+        {tabs.map(([k, label]) => (
+          <button key={k} role="tab" aria-selected={cur === k} className={cur === k ? "on" : ""} onClick={() => useHud.setState({ peopleTab: k })}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      {cur === "people" && <PeopleTabView />}
+      {cur === "nation" && <NationTabView />}
+      {cur === "stock" && <StockTabView />}
+    </div>
+  );
+}
+
+function PeopleTabView() {
   const people = useHud((s) => s.people);
-  const stock = useHud((s) => s.stock);
+  const pop = useHud((s) => s.pop);
+  const abroad = useHud((s) => s.abroad);
+  const robots = useHud((s) => s.robots);
   const openGroup = useHud((s) => s.openGroup);
   const rows = useGroupRows();
+  const [showGone, setShowGone] = useState(false);
   const gone = people.filter((p) => !p.alive);
+  const alive = people.filter((p) => p.alive);
   return (
-    <div className="card drawer">
-      <button className="x" onClick={() => useHud.setState({ panel: "none" })}>✕</button>
-      <h3>섬 사람들</h3>
+    <>
+      <div className="psum">
+        섬에 <b>{pop}명</b>
+        {robots > 0 && <> · 🤖 {robots}</>}
+        {abroad > 0 && <> · ⛵ 섬 밖 {abroad}</>}
+      </div>
       {rows ? (
         <div className="glist">
           {rows.map((g) => (
@@ -467,93 +516,93 @@ function PeopleDrawer() {
               )}
             </div>
           ))}
-          {gone.length > 0 && (
+        </div>
+      ) : (
+        <ul className="plist">
+          {alive.map((p) => <PersonItem key={p.id} p={p} />)}
+        </ul>
+      )}
+      {gone.length > 0 && (
+        <>
+          <button className="gone-toggle" aria-expanded={showGone} onClick={() => setShowGone((v) => !v)}>
+            🕯️ 얼마 전 떠난 사람 {gone.length}명 {showGone ? "▾" : "▸"}
+          </button>
+          {showGone && (
             <ul className="plist">
               {gone.map((p) => <PersonItem key={p.id} p={p} />)}
             </ul>
           )}
-        </div>
-      ) : (
-        <ul className="plist">
-          {people.map((p) => <PersonItem key={p.id} p={p} />)}
-        </ul>
+        </>
       )}
-      <SocietyInfo />
-      <h3>창고</h3>
-      <div className="stock">
-        {stock.length === 0 && <span className="sub">아직 모아둔 것이 없어요</span>}
-        {stock.map(([k, v]) => (
-          <span key={k} className="chip">
-            {k} {v}
-          </span>
-        ))}
-      </div>
-    </div>
+    </>
   );
 }
 
-/** 나라 · 종교 · 경제 */
-function SocietyInfo() {
+/** 나라 · 종교 · 살림 · 도박장: 한 줄씩만 (자세한 숫자는 마우스를 올리면) */
+function NationTabView() {
   const nation = useHud((s) => s.nation);
   const faiths = useHud((s) => s.faiths);
   const eco = useHud((s) => s.economy);
   const civic = useHud((s) => s.civic);
   const casino = useHud((s) => s.casino);
-  if (!nation && !faiths.length && !eco) return null;
   return (
-    <>
+    <div className="ntab">
       {nation && (
-        <>
-          <h3>👑 {nation.name}</h3>
-          <div className="society">
-            <div>왕 {nation.king} · {nation.gov}</div>
-            {nation.ministers && <div className="sub">{nation.ministers}</div>}
-            {nation.foreign.length > 0 && (
-              <div className="foreign">
-                {nation.foreign.map((n) => (
-                  <span key={n.name} className={`chip ${n.war ? "alert" : ""}`}>{n.war ? "⚔️" : "⛵"} {n.name} · {n.war ? "전쟁 중" : n.mood}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
+        <section>
+          <div className="nhead">👑 {nation.name} <span className="sub">{nation.gov}</span></div>
+          <div className="nrow">왕 {nation.king}</div>
+          {nation.ministers && <div className="nrow sub">{nation.ministers}</div>}
+          {nation.foreign.length > 0 && (
+            <div className="chips">
+              {nation.foreign.map((n) => (
+                <span key={n.name} className={`chip ${n.war ? "alert" : ""}`}>{n.war ? "⚔️" : "🤝"} {n.name} {n.war ? "전쟁 중" : n.mood}</span>
+              ))}
+            </div>
+          )}
+        </section>
       )}
       {faiths.length > 0 && (
-        <>
-          <h3>종교</h3>
-          <ul className="plist">
+        <section>
+          <div className="nhead">🙏 종교</div>
+          <div className="chips">
             {faiths.map((f) => (
-              <li key={f.name}>{f.icon} <b>{f.name}</b> · {f.wish} · {f.count}명 · 의식 {f.rites}번</li>
+              <span key={f.name} className="chip" title={`${f.wish} · 의식 ${f.rites}번`}>{f.icon} {f.name} {f.count}명</span>
             ))}
-          </ul>
-        </>
-      )}
-      {eco && (
-        <>
-          <h3>경제</h3>
-          <div className="society">{eco.currency} · 나라 곳간 {eco.treasury} · 거래 {eco.trades.toLocaleString()}번</div>
-        </>
-      )}
-      {civic && (
-        <>
-          <h3>나라 살림</h3>
-          <div className="society">
-            <div>💰 모인 돈 {civic.fund} · 거둔 세금 {civic.taxed} · 쓴 돈 {civic.spent}</div>
-            {civic.done && <div className="sub">고친 것: {civic.done}</div>}
-            {civic.voice && <div className="sub">🗣️ 요즘 백성들: {civic.voice}</div>}
           </div>
-        </>
+        </section>
+      )}
+      {(eco || civic) && (
+        <section>
+          <div className="nhead">💰 살림</div>
+          {eco && <div className="nrow" title={`거래 ${eco.trades.toLocaleString()}번`}>{eco.currency} · 곳간 {eco.treasury}</div>}
+          {civic && <div className="nrow" title={`거둔 세금 ${civic.taxed} · 쓴 돈 ${civic.spent}`}>나라 살림 {civic.fund}{civic.done && ` · 고친 것 ${civic.done}`}</div>}
+          {civic?.voice && <div className="nrow sub">🗣️ {civic.voice}</div>}
+        </section>
       )}
       {casino && (
-        <>
-          <h3>🎲 도박장</h3>
-          <div className="society">
-            <div>{casino.open ? `문 열림 · 한 번에 ${casino.cap}까지` : "⛔ 왕이 문을 닫음"}{casino.push && casino.open ? " · 왕이 적당한 놀이를 권하는 중" : ""}</div>
-            <div className="sub">판 {casino.plays.toLocaleString()}번 · 나라 살림에 보탠 돈 {casino.net}{casino.addicts > 0 ? ` · 🎰 게임중독 ${casino.addicts}명` : ""}</div>
+        <section>
+          <div className="nhead">🎲 도박장</div>
+          <div className="nrow" title={`판 ${casino.plays.toLocaleString()}번 · 나라 살림에 보탠 돈 ${casino.net}`}>
+            {casino.open ? `열림 · 한 번에 ${casino.cap}까지` : "⛔ 왕이 문을 닫음"}{casino.addicts > 0 && ` · 🎰 중독 ${casino.addicts}명`}
           </div>
-        </>
+        </section>
       )}
-    </>
+    </div>
+  );
+}
+
+function StockTabView() {
+  const stock = useHud((s) => s.stock);
+  const list = [...stock].sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="stock">
+      {list.length === 0 && <span className="sub">아직 모아둔 것이 없어요</span>}
+      {list.map(([k, v]) => (
+        <span key={k} className="chip">
+          {k} <b>{v}</b>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -686,8 +735,10 @@ function HelpModal() {
 
 function Toasts() {
   const toasts = useHud((s) => s.toasts);
+  // 엔딩 연출 중에는 위쪽 안내 아래로
+  const below = useHud((s) => !!s.ending && !s.ending.done);
   return (
-    <div className="toasts">
+    <div className={`toasts ${below ? "below" : ""}`}>
       {toasts.map((t) => (
         <div key={t.id} className={`toast k-${t.kind}`}>
           {t.text}
@@ -723,6 +774,174 @@ function Hint() {
           {touch ? "탭: 치기 · 끌기: 옮기기 · 연타: 불 · 두 손가락: 시점 이동" : "클릭: 치기 · 드래그: 옮기기 · 연타: 불 지피기 · 빈 곳 드래그: 시점 회전"}
         </div>
       )}
+    </div>
+  );
+}
+
+/** 누르고 있는 동안만 2배 · 3배로 빠르게 흐른다 (함께 보는 사람 모두에게) */
+function SpeedButtons({ rt }: { rt: GameRuntime }) {
+  const speed = useHud((s) => s.speed);
+  const [held, setHeld] = useState(0);
+  useEffect(() => {
+    if (!held) return;
+    const up = () => {
+      setHeld(0);
+      rt.holdSpeed(1);
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+    };
+  }, [held, rt]);
+  const press = (n: number) => {
+    setHeld(n);
+    rt.holdSpeed(n);
+  };
+  return (
+    <div className="speed" role="group" aria-label="배속">
+      {[2, 3].map((n) => (
+        <button
+          key={n}
+          className={held === n || (!held && speed === n) ? "on" : ""}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            press(n);
+          }}
+          onKeyDown={(e) => (e.key === " " || e.key === "Enter") && !e.repeat && press(n)}
+          onKeyUp={(e) => {
+            if (e.key !== " " && e.key !== "Enter") return;
+            setHeld(0);
+            rt.holdSpeed(1);
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+          title={`누르고 있는 동안 ${n}배속`}
+          aria-pressed={held === n}
+        >
+          ⏩<b>{n}배</b>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 엔딩 연출 중: 화면 위쪽에 지금 일어나는 일. 핵폭발 순간에는 화면이 하얗게 번쩍인다 */
+function EndingBanner() {
+  const e = useHud((s) => s.ending);
+  if (!e || e.done) return null;
+  const count = e.kind === "space" && e.ph === 2 ? Math.max(1, 3 - Math.floor(e.prog * 3)) : 0;
+  return (
+    <>
+      {e.kind === "nuke" && e.ph === 2 && <div className="nuke-flash" key={e.key} />}
+      <div className={`card ending-banner k-${e.kind}`} role="status">
+        <div className="eb-title">{e.icon} 엔딩 · {e.title}</div>
+        <div className="eb-cap">{e.caption}{count ? ` · ${count}…` : ""}</div>
+        <span className="btrack wide">
+          <span className="bfill" style={{ width: `${Math.round(e.prog * 100)}%` }} />
+        </span>
+      </div>
+    </>
+  );
+}
+
+function CreditsModal({ rt }: { rt: GameRuntime }) {
+  const open = useHud((s) => s.creditsOpen);
+  const c = useHud((s) => s.credits);
+  if (!open || !c) return null;
+  return <CreditsRoll c={c} rt={rt} />;
+}
+
+/** 크레딧: 천천히 저절로 올라가고, 직접 굴리면 잠시 멈춘다 */
+function CreditsRoll({ c, rt }: { c: Credits; rt: GameRuntime }) {
+  const box = useRef<HTMLDivElement>(null);
+  const pause = useRef(0);
+  useEffect(() => {
+    let raf = 0;
+    let last = performance.now();
+    let pos = 0;
+    const tick = (now: number) => {
+      const el = box.current;
+      const dt = Math.min(0.1, (now - last) / 1000);
+      last = now;
+      if (el) {
+        if (now < pause.current) pos = el.scrollTop;
+        else if (el.scrollTop < el.scrollHeight - el.clientHeight - 1) {
+          pos += dt * 34;
+          el.scrollTop = pos;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const hold = () => (pause.current = performance.now() + 4000);
+  return (
+    <div className="credits-back" role="dialog" aria-label="엔딩 크레딧">
+      <div className="credits" ref={box} onWheel={hold} onPointerDown={hold} onTouchStart={hold}>
+        <div className="roll">
+          <div className="c-icon">{c.icon}</div>
+          <h2>{c.title}</h2>
+          {c.story.map((t) => <p key={t} className="c-story">{t}</p>)}
+          {c.annals.length > 0 && (
+            <>
+              <h3>섬의 연대기</h3>
+              <ul className="c-annals">
+                {c.annals.map((t, i) => <li key={i}>{t}</li>)}
+              </ul>
+            </>
+          )}
+          <h3>섬의 기록</h3>
+          <dl className="c-stats">
+            {c.stats.map(([k, v]) => (
+              <div key={k}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+          {c.cast.length > 0 && (
+            <>
+              <h3>마지막 날 섬에 있던 사람들</h3>
+              <p className="c-cast">{c.cast.join(" · ")}</p>
+            </>
+          )}
+          <p className="c-end">— 끝 —</p>
+        </div>
+      </div>
+      <div className="credits-actions">
+        <button className="primary" onClick={() => rt.closeCredits()}>계속 이어가기</button>
+        <button className="ghost" onClick={() => useHud.setState({ confirmRestart: true })}>새로 시작하기</button>
+      </div>
+    </div>
+  );
+}
+
+function RestartConfirm({ rt }: { rt: GameRuntime }) {
+  const open = useHud((s) => s.confirmRestart);
+  if (!open) return null;
+  const close = () => useHud.setState({ confirmRestart: false });
+  return (
+    <div className="modal-back confirm-back" onClick={close}>
+      <div className="card modal confirm" role="alertdialog" aria-label="새로 시작하기" onClick={(e) => e.stopPropagation()}>
+        <h3>🌱 처음부터 다시 시작할까요?</h3>
+        <p>이 섬의 사람과 마을, 깨친 지식이 모두 사라지고 표류자 한 명이 해변에서 눈을 뜨는 것부터 다시 시작해요. 되돌릴 수 없어요.</p>
+        <div className="row-btns">
+          <button className="ghost" onClick={close}>그만두기</button>
+          <button
+            className="primary danger"
+            onClick={() => {
+              useHud.setState({ confirmRestart: false, creditsOpen: false });
+              rt.restart();
+            }}
+          >
+            새로 시작하기
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
