@@ -9,6 +9,8 @@ export const YEAR = DAY * DAYS_PER_SEASON * 4;
 /** 호스트가 실시간으로 시뮬레이션을 돌리는 주기(현실 ms). */
 export const SIM_TICK_MS = 100;
 export const MAX_VIEWERS = 3;
+/** 배속 버튼을 누르고 있는 동안의 빠르기 */
+export const FAST_SPEED = 10;
 
 /** 지형: 처음 섬(CORE_RADIUS)은 그대로 두고 바깥으로 넓혀 넓이를 두 배로 만들었다 */
 export const WORLD_SIZE = 320;

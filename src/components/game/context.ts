@@ -18,7 +18,7 @@ export function useRuntime() {
 
 export const useAmbience = () => useContext(AudioContext3D);
 
-/** 런타임의 구조 버전이 바뀔 때만 다시 렌더링 */
+/** 런타임의 구조 버전이 바뀔 때만 다시 렌더링 (배속 중에는 바뀌는 일이 그만큼 잦아지니 그만큼 뜸하게) */
 export function useWorldVersion(throttleMs = 0) {
   const rt = useRuntime();
   const [v, setV] = useState(rt.version);
@@ -26,7 +26,7 @@ export function useWorldVersion(throttleMs = 0) {
   useFrame(() => {
     if (rt.version !== v) {
       const now = performance.now();
-      if (now - last.current >= throttleMs) {
+      if (now - last.current >= throttleMs * (rt.world?.spd ?? 1)) {
         last.current = now;
         setV(rt.version);
       }

@@ -6,7 +6,7 @@ import type { Credits } from "@/sim/ending";
 import type { ChronicleEntry } from "@/sim/types";
 import type { GameRuntime } from "@/game/runtime";
 import type { Ambience } from "@/game/audio";
-import { GROUP_POP, MAX_VIEWERS } from "@/sim/constants";
+import { FAST_SPEED, GROUP_POP, MAX_VIEWERS } from "@/sim/constants";
 import { HELP } from "./helpData";
 import { ERAS, TECHS } from "@/sim/data";
 import { moraleLabel } from "@/sim/morale";
@@ -56,7 +56,7 @@ export function Hud({ rt, amb, onExit }: { rt: GameRuntime; amb: Ambience; onExi
           <Drawer />
           <Toasts />
           <Hint />
-          <SpeedButtons rt={rt} />
+          <SpeedButton rt={rt} />
           <EndingBanner />
           <Away />
           <CreditsModal rt={rt} />
@@ -778,14 +778,14 @@ function Hint() {
   );
 }
 
-/** 누르고 있는 동안만 2배 · 3배로 빠르게 흐른다 (함께 보는 사람 모두에게) */
-function SpeedButtons({ rt }: { rt: GameRuntime }) {
+/** 누르고 있는 동안만 10배로 빠르게 흐른다 (함께 보는 사람 모두에게) */
+function SpeedButton({ rt }: { rt: GameRuntime }) {
   const speed = useHud((s) => s.speed);
-  const [held, setHeld] = useState(0);
+  const [held, setHeld] = useState(false);
   useEffect(() => {
     if (!held) return;
     const up = () => {
-      setHeld(0);
+      setHeld(false);
       rt.holdSpeed(1);
     };
     window.addEventListener("pointerup", up);
@@ -797,33 +797,30 @@ function SpeedButtons({ rt }: { rt: GameRuntime }) {
       window.removeEventListener("blur", up);
     };
   }, [held, rt]);
-  const press = (n: number) => {
-    setHeld(n);
-    rt.holdSpeed(n);
+  const press = () => {
+    setHeld(true);
+    rt.holdSpeed(FAST_SPEED);
   };
   return (
-    <div className="speed" role="group" aria-label="배속">
-      {[2, 3].map((n) => (
-        <button
-          key={n}
-          className={held === n || (!held && speed === n) ? "on" : ""}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            press(n);
-          }}
-          onKeyDown={(e) => (e.key === " " || e.key === "Enter") && !e.repeat && press(n)}
-          onKeyUp={(e) => {
-            if (e.key !== " " && e.key !== "Enter") return;
-            setHeld(0);
-            rt.holdSpeed(1);
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          title={`누르고 있는 동안 ${n}배속`}
-          aria-pressed={held === n}
-        >
-          ⏩<b>{n}배</b>
-        </button>
-      ))}
+    <div className="speed">
+      <button
+        className={held || speed > 1 ? "on" : ""}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          press();
+        }}
+        onKeyDown={(e) => (e.key === " " || e.key === "Enter") && !e.repeat && press()}
+        onKeyUp={(e) => {
+          if (e.key !== " " && e.key !== "Enter") return;
+          setHeld(false);
+          rt.holdSpeed(1);
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        title={`누르고 있는 동안 ${FAST_SPEED}배속`}
+        aria-pressed={held}
+      >
+        ⏩<b>{FAST_SPEED}배</b>
+      </button>
     </div>
   );
 }

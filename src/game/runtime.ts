@@ -1,7 +1,7 @@
 // 브라우저 쪽 게임 런타임: 시뮬레이션 루프, 호스트 선출, 동기화, 저장.
 import { actLabel } from "@/sim/ai";
 import { ageYears, clockLabel, dayOf, seasonOf, SEASONS, timeOfDayLabel, yearOf } from "@/sim/clock";
-import { MAX_VIEWERS, SCHEMA_VERSION, SIM_TICK_MS, TIME_SCALE } from "@/sim/constants";
+import { FAST_SPEED, MAX_VIEWERS, SCHEMA_VERSION, SIM_TICK_MS, TIME_SCALE } from "@/sim/constants";
 import { ERAS, RES_NAME, ROLE_ICON, ROLE_NAME, STRUCTS, TECH_BY_ID, WOODEN } from "@/sim/data";
 import { active, beastName, TOWER, towerRange } from "@/sim/beasts";
 import { floorsOf, hpOf, maxHp, purposeOf } from "@/sim/building";
@@ -558,7 +558,7 @@ export class GameRuntime {
       if (from === this.viewerId) this.transport.send("speed", { mul });
       return;
     }
-    if (mul > 1) this.speedReq.set(from, { mul: Math.min(3, mul), until: performance.now() + 2500 });
+    if (mul > 1) this.speedReq.set(from, { mul: Math.min(FAST_SPEED, mul), until: performance.now() + 2500 });
     else this.speedReq.delete(from);
   }
 
